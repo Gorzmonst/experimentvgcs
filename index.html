@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>大会デッキ情報</title>
+  <style>
+    body {
+      font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      text-align: center;
+      line-height: 1.6;
+    }
+    h1 { margin-bottom: 0.5em; }
+    a.button {
+      display: inline-block;
+      margin: 20px;
+      padding: 15px 40px;
+      background: #e74c3c;
+      color: white;
+      text-decoration: none;
+      border-radius: 8px;
+      font-size: 1.2em;
+      font-weight: bold;
+      transition: background 0.2s;
+    }
+    a.button:hover { background: #c0392b; }
+    .note {
+      margin-top: 50px;
+      color: #666;
+      font-size: 0.9em;
+      text-align: left;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>大会デッキ情報公開</h1>
+  <p>トナメルのCSVから使用率分布とデッキ公開画像を作成します。</p>
+
+  <a class="button" href="usage.html">使用率分布</a>
+  <a class="button" href="deck-images.html">デッキ公開画像</a>
+
+  <div class="note">
+    <p>※ 各ページでトナメルの参加者CSVをアップロードして使用してください。</p>
+    <p>※ ライドラインの正式名称・略称・カード番号は <code>ridelines.csv</code> で管理します。<br>
+       新しいカードが追加された場合はCSVを更新するだけで対応できます。</p>
+    <p>※ 円グラフ内のカード画像は公式サイトの画像リンクを使用しています。<br>
+       画像の位置は「画像調整モード」でドラッグ（スマホはタップドラッグ）して調整可能です。</p>
+  </div>
+</body>
+</html>
