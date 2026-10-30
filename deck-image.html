@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>デッキ公開画像</title>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+  <style>
+    body {
+      font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    .deck-card {
+      border: 2px solid #333;
+      border-radius: 12px;
+      padding: 15px;
+      margin: 15px;
+      background: #fff;
+      width: 280px;
+      display: inline-block;
+      vertical-align: top;
+      text-align: center;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .deck-card img {
+      max-height: 180px;
+      max-width: 100%;
+      display: block;
+      margin: 0 auto 10px;
+    }
+    .deck-card h3 {
+      margin: 8px 0 4px;
+      font-size: 1.1em;
+    }
+    .deck-card p {
+      margin: 4px 0;
+      font-size: 1em;
+    }
+    button { padding: 6px 12px; margin: 5px; cursor: pointer; }
+    #cards { text-align: center; }
+  </style>
+</head>
+<body>
+  <p><a href="index.html">← トップへ戻る</a></p>
+  <h1>上位デッキ公開用画像</h1>
+
+  <p>
+    トナメルCSV：<input type="file" id="csvFile" accept=".csv">
+    デッキ名カラム：<input type="text" id="deckColumn" value="使用デッキ" style="width:140px">
+    <button onclick="processCSV()">読み込み</button>
+  </p>
+
+  <p>
+    ライドラインCSV（任意）：<input type="file" id="rideCsv" accept=".csv">
+    <button onclick="loadRideLines()">マッピング読み込み</button>
+    <span id="rideStatus">マッピング未読み込み</span>
+  </p>
+
+  <div id="cards"></div>
+
+  <script>
+    let rideMap = {};
+
+    function getCardImageUrl(cardNo) {
+      if (!cardNo) return null;
+      const parts = cardNo.split('/');
+      if (parts.length < 2) return null;
+      const set = parts[0];
+      const num = parts[1].padStart(3, '0');
+      const setLower = set.toLowerCase().replace(/-/g, '');
+      return `https://cf-vanguard.com/wordpress/wp-content/images/cardlist/${set}/${setLower}_${num}.png`;
+    }
+
+    function loadRideLines() {
+      const file = document.getElementById('rideCsv').files[0];
+      const doParse = (textOrFile) => {
+        Papa.parse(textOrFile, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (res) => {
+            buildRideMap(res.data);
+            document.getElementById('rideStatus').textContent =
+              `マッピング読み込み完了（${Object.keys(rideMap).length}件）`;
+          }
+        });
+      };
+
+      if (file) {
+        doParse(file);
+      } else {
+        fetch('./ridelines.csv')
+          .then(r => {
+            if (!r.ok) throw new Error();
+            return r.text();
+          })
+          .then(text => doParse(text))
+          .catch(() => {
+            document.getElementById('rideStatus').textContent = 'ridelines.csv が見つかりません。ファイルを選択してください';
+          });
+      }
+    }
+
+    function buildRideMap(data) {
+      rideMap = {};
+      data.forEach(row => {
+        const abbr = (row['略称'] || '').trim();
+        const full = (row['正式名称'] || '').trim();
+        const cardNo = (row['カード番号'] || '').trim();
+        if (!abbr && !full) return;
+        const img = getCardImageUrl(cardNo);
+        const entry = { 正式名称: full, カード番号: cardNo, 画像URL: img };
+        if (abbr) rideMap[abbr] = entry;
+        if (full) rideMap[full] = entry;
+      });
+    }
+
+    function getRideInfo(deckName) {
+      const key = (deckName || '').trim();
+      return rideMap[key] || null;
+    }
+
+    function processCSV() {
+      const file = document.getElementById('csvFile').files[0];
+      const columnName = document.getElementById('deckColumn').value.trim();
+      if (!file) return alert('CSVを選択してください');
+
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          const counts = {};
+          let total = 0;
+          results.data.forEach(row => {
+            const deck = (row[columnName] || '').trim();
+            if (deck) {
+              counts[deck] = (counts[deck] || 0) + 1;
+              total++;
+            }
+          });
+          if (!total) return alert('データが見つかりません。カラム名を確認してください');
+
+          // 使用率の高い順にソート（上位12件）
+          const sorted = Object.entries(counts)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 12);
+
+          const container = document.getElementById('cards');
+          container.innerHTML = '';
+
+          sorted.forEach(([name, count], idx) => {
+            const percent = (count / total * 100).toFixed(1);
+            const info = getRideInfo(name);
+            const imgUrl = info ? info.画像URL : '';
+            const displayName = info && info.正式名称 ? info.正式名称 : name;
+
+            const card = document.createElement('div');
+            card.className = 'deck-card';
+            card.id = 'card-' + idx;
+            card.innerHTML = `
+              ${imgUrl ? `<img src="${imgUrl}" alt="${displayName}" crossorigin="anonymous" onerror="this.style.display='none'">` : '<div style="height:180px; background:#f0f0f0; display:flex; align-items:center; justify-content:center; color:#999;">画像なし</div>'}
+              <h3>${displayName}</h3>
+              <p>${count}人使用<br>（${percent}%）</p>
+              <button onclick="downloadCard(${idx}, '${name.replace(/'/g, "\\'")}')">この画像をダウンロード</button>
+            `;
+            container.appendChild(card);
+          });
+        }
+      });
+    }
+
+    function downloadCard(idx, name) {
+      const el = document.getElementById('card-' + idx);
+      html2canvas(el, { scale: 2, useCORS: true, allowTaint: true }).then(canvas => {
+        const a = document.createElement('a');
+        a.href = canvas.toDataURL('image/png');
+        a.download = `${name}_deck.png`;
+        a.click();
+      });
+    }
+
+    // ページ読み込み時に自動でマッピングを試みる
+    window.addEventListener('load', () => {
+      loadRideLines();
+    });
+  </script>
+</body>
+</html>
