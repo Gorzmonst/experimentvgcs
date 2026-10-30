@@ -21,6 +21,11 @@
     #adjustModeBtn.active { background: #e74c3c; color: white; }
     #adjustHint { color: #666; font-size: 0.9em; display: none; }
     canvas { touch-action: none; }
+    .sns-row { margin: 6px 0; display: flex; align-items: center; }
+    .thumb, .thumb-ph {
+      width: 36px; height: 50px; margin-right: 8px; flex-shrink: 0;
+      object-fit: cover; background: #ddd; border-radius: 2px;
+    }
   </style>
 </head>
 <body>
@@ -59,12 +64,37 @@
     let dragging = null;
     let imgElements = [];
 
+    // HTMLエスケープ（CSVの文字列をinnerHTMLに入れるため）
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+      ));
+    }
+
+    // デッキ名の表記ゆれを吸収（全角半角・引用符の種類）
+    function normKey(s) {
+      return String(s || '')
+        .normalize('NFKC')
+        .replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"')
+        .replace(/[\u2018\u2019\u201A\u201B\u2032]/g, "'")
+        .trim();
+    }
+
+    // 画像が無い場合のグレー枠（HTML文字列／onerror用）
+    function makePlaceholder() {
+      const span = document.createElement('span');
+      span.className = 'thumb-ph';
+      return span;
+    }
+
     function getCardImageUrl(cardNo) {
       if (!cardNo) return null;
       const parts = cardNo.split('/');
       if (parts.length < 2) return null;
-      const set = parts[0];
-      const num = parts[1].padStart(3, '0');
+      const set = parts[0].trim();
+      let num = parts[1].trim();
+      if (!set || !num) return null;
+      if (/^\d+$/.test(num)) num = num.padStart(3, '0');
       const setLower = set.toLowerCase().replace(/-/g, '');
       return `https://cf-vanguard.com/wordpress/wp-content/images/cardlist/${set}/${setLower}_${num}.png`;
     }
@@ -82,7 +112,7 @@
             complete: (res) => {
               buildRideMap(res.data);
               document.getElementById('rideStatus').textContent =
-                `ライドラインマッピング読み込み完了（${Object.keys(rideMap).length}件）`;
+                `ライドラインマッピング読み込み完了（${res.data.length}件）`;
             }
           });
         })
@@ -98,16 +128,15 @@
         const full = (row['正式名称'] || '').trim();
         const cardNo = (row['カード番号'] || '').trim();
         if (!abbr && !full) return;
-        const img = getCardImageUrl(cardNo);
+        const img = getCardImageUrl(cardNo); // 番号が空なら null
         const entry = { 正式名称: full, カード番号: cardNo, 画像URL: img };
-        if (abbr) rideMap[abbr] = entry;
-        if (full) rideMap[full] = entry;
+        if (abbr) rideMap[normKey(abbr)] = entry;
+        if (full) rideMap[normKey(full)] = entry;
       });
     }
 
     function getRideInfo(deckName) {
-      const key = (deckName || '').trim();
-      return rideMap[key] || null;
+      return rideMap[normKey(deckName)] || null;
     }
 
     function toggleAdjustMode() {
@@ -117,12 +146,23 @@
       btn.textContent = `画像調整モード: ${adjustMode ? 'ON' : 'OFF'}`;
       btn.classList.toggle('active', adjustMode);
       hint.style.display = adjustMode ? 'block' : 'none';
-      if (chart) chart.update();
+      if (chart) {
+        chart.options.plugins.tooltip.enabled = !adjustMode;
+        chart.update();
+      }
     }
 
     function resetOffsets() {
       imageOffsets = imageOffsets.map(() => ({ dx: 0, dy: 0 }));
       if (chart) chart.update();
+    }
+
+    function buildSnsRow(d) {
+      const info = getRideInfo(d.name);
+      const thumb = (info && info.画像URL)
+        ? `<img class="thumb" src="${esc(info.画像URL)}" crossorigin="anonymous" onerror="this.replaceWith(makePlaceholder())">`
+        : `<span class="thumb-ph"></span>`;
+      return `<div class="sns-row">${thumb}<span>${esc(d.name)}　${d.percent}%（${d.count}人）</span></div>`;
     }
 
     function processCSV() {
@@ -157,17 +197,13 @@
           // 箇条書き（高い順）
           document.getElementById('list').innerHTML =
             `<h2>使用率上位（全${total}人）</h2><ul>` +
-            sortedData.map(d => `<li><strong>${d.name}</strong>：${d.count}人（${d.percent}%）</li>`).join('') +
+            sortedData.map(d => `<li><strong>${esc(d.name)}</strong>：${d.count}人（${d.percent}%）</li>`).join('') +
             '</ul>';
 
-          // SNS用テキスト
+          // SNS用テキスト（画像が無い行もグレー枠でそろえる）
           document.getElementById('snsContent').innerHTML =
             `<h3>使用率分布</h3>` +
-            sortedData.slice(0, 10).map(d => {
-              const info = getRideInfo(d.name);
-              const img = info ? info.画像URL : '';
-              return `<div style="margin:6px 0;"><img src="${img}" style="height:50px; vertical-align:middle; margin-right:8px;" onerror="this.style.display='none'"> ${d.name}　${d.percent}%（${d.count}人）</div>`;
-            }).join('');
+            sortedData.slice(0, 10).map(buildSnsRow).join('');
 
           imageOffsets = sortedData.map(() => ({ dx: 0, dy: 0 }));
           createPieChart();
@@ -182,11 +218,13 @@
       const values = sortedData.map(d => d.count);
       const colors = labels.map((_, i) => `hsl(${i * 360 / labels.length}, 70%, 55%)`);
 
+      // 円グラフのcanvasは画像保存しないので crossOrigin は付けない
+      // （付けると公式側がCORS非対応の場合に読み込み自体が失敗するため）
       imgElements = sortedData.map(d => {
         const info = getRideInfo(d.name);
         if (!info || !info.画像URL) return null;
         const img = new Image();
-        img.crossOrigin = 'anonymous';
+        img.onload = () => { if (chart) chart.update('none'); };
         img.src = info.画像URL;
         return img;
       });
@@ -216,7 +254,8 @@
 
             meta.data.forEach((arc, i) => {
               const img = imgElements[i];
-              if (!img || !img.complete) return;
+              // 読み込み未完了・失敗（naturalWidth 0）の画像はスキップ
+              if (!img || !img.complete || img.naturalWidth === 0) return;
 
               const midAngle = arc.startAngle + (arc.endAngle - arc.startAngle) / 2;
               const radius = (arc.outerRadius + arc.innerRadius) / 2 * 0.65;
@@ -231,7 +270,11 @@
 
               const size = 46;
               ctx.save();
-              ctx.drawImage(img, x - size / 2, y - size / 2, size, size * 1.4);
+              try {
+                ctx.drawImage(img, x - size / 2, y - size / 2, size, size * 1.4);
+              } catch (e) {
+                // 描画に失敗してもグラフ全体は止めない
+              }
               ctx.restore();
             });
           }
@@ -261,7 +304,8 @@
         let minDist = 50;
 
         meta.data.forEach((arc, i) => {
-          if (!imgElements[i]) return;
+          const img = imgElements[i];
+          if (!img || img.naturalWidth === 0) return;
           const midAngle = arc.startAngle + (arc.endAngle - arc.startAngle) / 2;
           const radius = (arc.outerRadius + arc.innerRadius) / 2 * 0.65;
           const centerX = chart.chartArea.left + (chart.chartArea.right - chart.chartArea.left) / 2;
@@ -307,13 +351,18 @@
         dragging = null;
       }
 
-      canvas.onmousedown = null;
-      canvas.onmousemove = null;
-      canvas.onmouseup = null;
-      canvas.onmouseleave = null;
-      canvas.ontouchstart = null;
-      canvas.ontouchmove = null;
-      canvas.ontouchend = null;
+      // chartを作り直すたびにcanvasは同じなので、古いリスナーが重複しないよう差し替える
+      if (canvas._dragHandlers) {
+        const h = canvas._dragHandlers;
+        canvas.removeEventListener('mousedown', h.onStart);
+        canvas.removeEventListener('mousemove', h.onMove);
+        canvas.removeEventListener('mouseup', h.onEnd);
+        canvas.removeEventListener('mouseleave', h.onEnd);
+        canvas.removeEventListener('touchstart', h.onStart);
+        canvas.removeEventListener('touchmove', h.onMove);
+        canvas.removeEventListener('touchend', h.onEnd);
+      }
+      canvas._dragHandlers = { onStart, onMove, onEnd };
 
       canvas.addEventListener('mousedown', onStart);
       canvas.addEventListener('mousemove', onMove);
@@ -326,7 +375,7 @@
 
     function downloadSNSImage() {
       const el = document.getElementById('snsCapture');
-      html2canvas(el, { scale: 2, useCORS: true, allowTaint: true }).then(canvas => {
+      html2canvas(el, { scale: 2, useCORS: true, allowTaint: false }).then(canvas => {
         const a = document.createElement('a');
         a.href = canvas.toDataURL('image/png');
         a.download = 'deck_usage_sns.png';
