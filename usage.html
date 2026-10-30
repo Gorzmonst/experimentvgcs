@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>使用率分布</title>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+  <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+  <style>
+    body {
+      font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    #list li { margin: 8px 0; }
+    .sns-area { margin-top: 30px; border: 1px solid #ddd; padding: 15px; background: #fafafa; }
+    button { padding: 8px 16px; margin: 5px; cursor: pointer; }
+    #adjustModeBtn.active { background: #e74c3c; color: white; }
+    #adjustHint { color: #666; font-size: 0.9em; display: none; }
+    canvas { touch-action: none; }
+  </style>
+</head>
+<body>
+  <p><a href="index.html">← トップへ戻る</a></p>
+  <h1>デッキ使用率分布</h1>
+
+  <p>
+    トナメルCSV：<input type="file" id="csvFile" accept=".csv">
+    デッキ名カラム：<input type="text" id="deckColumn" value="使用デッキ" style="width:140px">
+    <button onclick="processCSV()">集計</button>
+  </p>
+
+  <p>
+    ライドラインCSV（任意）：<input type="file" id="rideCsv" accept=".csv">
+    <button onclick="loadRideLines()">マッピング読み込み</button>
+    <span id="rideStatus">マッピング未読み込み</span>
+  </p>
+
+  <p>
+    <button id="adjustModeBtn" onclick="toggleAdjustMode()">画像調整モード: OFF</button>
+    <button onclick="resetOffsets()">画像位置をリセット</button>
+  </p>
+  <p id="adjustHint">調整モード中：画像をドラッグ（スマホはタップしたまま移動）して位置を調整できます</p>
+
+  <div id="list"></div>
+  <canvas id="pieChart" style="max-width:700px; margin:20px auto; display:block;"></canvas>
+
+  <div class="sns-area" id="snsCapture">
+    <h2>SNS投稿用まとめ</h2>
+    <div id="snsContent"></div>
+  </div>
+  <button onclick="downloadSNSImage()">SNS用画像をダウンロード</button>
+
+  <script>
+    let rideMap = {};
+    let chart = null;
+    let sortedData = [];
+    let imageOffsets = [];
+    let adjustMode = false;
+    let dragging = null;
+    let imgElements = [];
+
+    function getCardImageUrl(cardNo) {
+      if (!cardNo) return null;
+      const parts = cardNo.split('/');
+      if (parts.length < 2) return null;
+      const set = parts[0];
+      const num = parts[1].padStart(3, '0');
+      const setLower = set.toLowerCase().replace(/-/g, '');
+      return `https://cf-vanguard.com/wordpress/wp-content/images/cardlist/${set}/${setLower}_${num}.png`;
+    }
+
+    function loadRideLines() {
+      const file = document.getElementById('rideCsv').files[0];
+      const doParse = (textOrFile) => {
+        Papa.parse(textOrFile, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (res) => {
+            buildRideMap(res.data);
+            document.getElementById('rideStatus').textContent =
+              `マッピング読み込み完了（${Object.keys(rideMap).length}件）`;
+          }
+        });
+      };
+
+      if (file) {
+        doParse(file);
+      } else {
+        fetch('./ridelines.csv')
+          .then(r => {
+            if (!r.ok) throw new Error();
+            return r.text();
+          })
+          .then(text => doParse(text))
+          .catch(() => {
+            document.getElementById('rideStatus').textContent = 'ridelines.csv が見つかりません。ファイルを選択してください';
+          });
+      }
+    }
+
+    function buildRideMap(data) {
+      rideMap = {};
+      data.forEach(row => {
+        const abbr = (row['略称'] || '').trim();
+        const full = (row['正式名称'] || '').trim();
+        const cardNo = (row['カード番号'] || '').trim();
+        if (!abbr && !full) return;
+        const img = getCardImageUrl(cardNo);
+        const entry = { 正式名称: full, カード番号: cardNo, 画像URL: img };
+        if (abbr) rideMap[abbr] = entry;
+        if (full) rideMap[full] = entry;
+      });
+    }
+
+    function getRideInfo(deckName) {
+      const key = (deckName || '').trim();
+      return rideMap[key] || null;
+    }
+
+    function toggleAdjustMode() {
+      adjustMode = !adjustMode;
+      const btn = document.getElementById('adjustModeBtn');
+      const hint = document.getElementById('adjustHint');
+      btn.textContent = `画像調整モード: ${adjustMode ? 'ON' : 'OFF'}`;
+      btn.classList.toggle('active', adjustMode);
+      hint.style.display = adjustMode ? 'block' : 'none';
+      if (chart) chart.update();
+    }
+
+    function resetOffsets() {
+      imageOffsets = imageOffsets.map(() => ({ dx: 0, dy: 0 }));
+      if (chart) chart.update();
+    }
+
+    function processCSV() {
+      const file = document.getElementById('csvFile').files[0];
+      const columnName = document.getElementById('deckColumn').value.trim();
+      if (!file) return alert('CSVを選択してください');
+
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          const counts = {};
+          let total = 0;
+          results.data.forEach(row => {
+            const deck = (row[columnName] || '').trim();
+            if (deck) {
+              counts[deck] = (counts[deck] || 0) + 1;
+              total++;
+            }
+          });
+          if (!total) return alert('データが見つかりません。カラム名を確認してください');
+
+          // 使用率の高い順にソート
+          sortedData = Object.entries(counts)
+            .sort((a, b) => b[1] - a[1])
+            .map(([name, count]) => ({
+              name,
+              count,
+              percent: (count / total * 100).toFixed(1)
+            }));
+
+          // 箇条書き（高い順）
+          document.getElementById('list').innerHTML =
+            `<h2>使用率上位（全${total}人）</h2><ul>` +
+            sortedData.map(d => `<li><strong>${d.name}</strong>：${d.count}人（${d.percent}%）</li>`).join('') +
+            '</ul>';
+
+          // SNS用テキスト
+          document.getElementById('snsContent').innerHTML =
+            `<h3>使用率分布</h3>` +
+            sortedData.slice(0, 10).map(d => {
+              const info = getRideInfo(d.name);
+              const img = info ? info.画像URL : '';
+              return `<div style="margin:6px 0;"><img src="${img}" style="height:50px; vertical-align:middle; margin-right:8px;" onerror="this.style.display='none'"> ${d.name}　${d.percent}%（${d.count}人）</div>`;
+            }).join('');
+
+          imageOffsets = sortedData.map(() => ({ dx: 0, dy: 0 }));
+          createPieChart();
+        }
+      });
+    }
+
+    function createPieChart() {
+      if (chart) chart.destroy();
+
+      const labels = sortedData.map(d => d.name);
+      const values = sortedData.map(d => d.count);
+      const colors = labels.map((_, i) => `hsl(${i * 360 / labels.length}, 70%, 55%)`);
+
+      imgElements = sortedData.map(d => {
+        const info = getRideInfo(d.name);
+        if (!info || !info.画像URL) return null;
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = info.画像URL;
+        return img;
+      });
+
+      const ctx = document.getElementById('pieChart').getContext('2d');
+      chart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+          labels,
+          datasets: [{
+            data: values,
+            backgroundColor: colors
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { position: 'right' },
+            tooltip: { enabled: !adjustMode }
+          }
+        },
+        plugins: [{
+          id: 'imageDrawer',
+          afterDatasetsDraw(chart) {
+            const ctx = chart.ctx;
+            const meta = chart.getDatasetMeta(0);
+
+            meta.data.forEach((arc, i) => {
+              const img = imgElements[i];
+              if (!img || !img.complete) return;
+
+              const midAngle = arc.startAngle + (arc.endAngle - arc.startAngle) / 2;
+              const radius = (arc.outerRadius + arc.innerRadius) / 2 * 0.65;
+              const centerX = chart.chartArea.left + (chart.chartArea.right - chart.chartArea.left) / 2;
+              const centerY = chart.chartArea.top + (chart.chartArea.bottom - chart.chartArea.top) / 2;
+
+              let x = centerX + Math.cos(midAngle) * radius;
+              let y = centerY + Math.sin(midAngle) * radius;
+
+              x += imageOffsets[i]?.dx || 0;
+              y += imageOffsets[i]?.dy || 0;
+
+              const size = 46;
+              ctx.save();
+              ctx.drawImage(img, x - size / 2, y - size / 2, size, size * 1.4);
+              ctx.restore();
+            });
+          }
+        }]
+      });
+
+      setupDragEvents();
+    }
+
+    function setupDragEvents() {
+      const canvas = chart.canvas;
+
+      function getMousePos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return {
+          x: (clientX - rect.left) * (canvas.width / rect.width),
+          y: (clientY - rect.top) * (canvas.height / rect.height)
+        };
+      }
+
+      function findNearestImage(pos) {
+        if (!adjustMode) return null;
+        const meta = chart.getDatasetMeta(0);
+        let nearest = null;
+        let minDist = 50;
+
+        meta.data.forEach((arc, i) => {
+          if (!imgElements[i]) return;
+          const midAngle = arc.startAngle + (arc.endAngle - arc.startAngle) / 2;
+          const radius = (arc.outerRadius + arc.innerRadius) / 2 * 0.65;
+          const centerX = chart.chartArea.left + (chart.chartArea.right - chart.chartArea.left) / 2;
+          const centerY = chart.chartArea.top + (chart.chartArea.bottom - chart.chartArea.top) / 2;
+          let x = centerX + Math.cos(midAngle) * radius + (imageOffsets[i]?.dx || 0);
+          let y = centerY + Math.sin(midAngle) * radius + (imageOffsets[i]?.dy || 0);
+
+          const dist = Math.hypot(pos.x - x, pos.y - y);
+          if (dist < minDist) {
+            minDist = dist;
+            nearest = i;
+          }
+        });
+        return nearest;
+      }
+
+      function onStart(e) {
+        if (!adjustMode) return;
+        e.preventDefault();
+        const pos = getMousePos(e);
+        const idx = findNearestImage(pos);
+        if (idx !== null) {
+          dragging = {
+            index: idx,
+            startX: pos.x,
+            startY: pos.y,
+            startDx: imageOffsets[idx].dx,
+            startDy: imageOffsets[idx].dy
+          };
+        }
+      }
+
+      function onMove(e) {
+        if (!dragging || !adjustMode) return;
+        e.preventDefault();
+        const pos = getMousePos(e);
+        imageOffsets[dragging.index].dx = dragging.startDx + (pos.x - dragging.startX);
+        imageOffsets[dragging.index].dy = dragging.startDy + (pos.y - dragging.startY);
+        chart.update('none');
+      }
+
+      function onEnd() {
+        dragging = null;
+      }
+
+      // 既存のリスナーをクリアして再設定（簡易的）
+      canvas.onmousedown = null;
+      canvas.onmousemove = null;
+      canvas.onmouseup = null;
+      canvas.onmouseleave = null;
+      canvas.ontouchstart = null;
+      canvas.ontouchmove = null;
+      canvas.ontouchend = null;
+
+      canvas.addEventListener('mousedown', onStart);
+      canvas.addEventListener('mousemove', onMove);
+      canvas.addEventListener('mouseup', onEnd);
+      canvas.addEventListener('mouseleave', onEnd);
+      canvas.addEventListener('touchstart', onStart, { passive: false });
+      canvas.addEventListener('touchmove', onMove, { passive: false });
+      canvas.addEventListener('touchend', onEnd);
+    }
+
+    function downloadSNSImage() {
+      const el = document.getElementById('snsCapture');
+      html2canvas(el, { scale: 2, useCORS: true, allowTaint: true }).then(canvas => {
+        const a = document.createElement('a');
+        a.href = canvas.toDataURL('image/png');
+        a.download = 'deck_usage_sns.png';
+        a.click();
+      });
+    }
+
+    // ページ読み込み時に自動でマッピングを試みる
+    window.addEventListener('load', () => {
+      loadRideLines();
+    });
+  </script>
+</body>
+</html>
