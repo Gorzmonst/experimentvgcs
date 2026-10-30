@@ -33,11 +33,7 @@
     <button onclick="processCSV()">集計</button>
   </p>
 
-  <p>
-    ライドラインCSV（任意）：<input type="file" id="rideCsv" accept=".csv">
-    <button onclick="loadRideLines()">マッピング読み込み</button>
-    <span id="rideStatus">マッピング未読み込み</span>
-  </p>
+  <p id="rideStatus">ライドラインマッピング読み込み中...</p>
 
   <p>
     <button id="adjustModeBtn" onclick="toggleAdjustMode()">画像調整モード: OFF</button>
@@ -74,32 +70,25 @@
     }
 
     function loadRideLines() {
-      const file = document.getElementById('rideCsv').files[0];
-      const doParse = (textOrFile) => {
-        Papa.parse(textOrFile, {
-          header: true,
-          skipEmptyLines: true,
-          complete: (res) => {
-            buildRideMap(res.data);
-            document.getElementById('rideStatus').textContent =
-              `マッピング読み込み完了（${Object.keys(rideMap).length}件）`;
-          }
-        });
-      };
-
-      if (file) {
-        doParse(file);
-      } else {
-        fetch('./ridelines.csv')
-          .then(r => {
-            if (!r.ok) throw new Error();
-            return r.text();
-          })
-          .then(text => doParse(text))
-          .catch(() => {
-            document.getElementById('rideStatus').textContent = 'ridelines.csv が見つかりません。ファイルを選択してください';
+      fetch('./ridelines.csv')
+        .then(r => {
+          if (!r.ok) throw new Error();
+          return r.text();
+        })
+        .then(text => {
+          Papa.parse(text, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (res) => {
+              buildRideMap(res.data);
+              document.getElementById('rideStatus').textContent =
+                `ライドラインマッピング読み込み完了（${Object.keys(rideMap).length}件）`;
+            }
           });
-      }
+        })
+        .catch(() => {
+          document.getElementById('rideStatus').textContent = 'ridelines.csv の読み込みに失敗しました';
+        });
     }
 
     function buildRideMap(data) {
@@ -318,7 +307,6 @@
         dragging = null;
       }
 
-      // 既存のリスナーをクリアして再設定（簡易的）
       canvas.onmousedown = null;
       canvas.onmousemove = null;
       canvas.onmouseup = null;
@@ -346,7 +334,7 @@
       });
     }
 
-    // ページ読み込み時に自動でマッピングを試みる
+    // ページ読み込み時に自動でマッピングを読み込む
     window.addEventListener('load', () => {
       loadRideLines();
     });
