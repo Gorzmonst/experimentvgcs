@@ -63,14 +63,10 @@
   <canvas id="snsCanvas" width="1920" height="1080"></canvas>
   <p id="imgStatus" style="font-size:0.9em;color:#555;"></p>
   <div id="verInfo"></div>
-  <p id="credit" style="display:none;font-size:0.85em;color:#555;">
-    当サイトに利用しているカード画像等は、カードファイト!! ヴァンガード公式ポータルサイト(http://cf-vanguard.com/) より、ガイドラインに従って転載しております。該当画像の再利用（転載・配布等）は禁止しております。<br>©Bushiroad
-  </p>
-  <p><button onclick="downloadSNSImage()">SNS用画像をダウンロード（1920×1080）</button></p>
 
   <script>
     // 画面右下に出る更新情報。コードを直したら APP_VERSION も書き換える
-    const APP_VERSION = '2026.11.01-11';
+    const APP_VERSION = '2026.11.01-6';
 
     function fmtJst(d) {
       if (!d || isNaN(d)) return '不明';
@@ -105,7 +101,7 @@
     let dragging = null;
     let sliceGeoms = [];      // 描画した各項目の扇形（クリック判定用）
     let rafPending = false;
-    const snsImgCache = {};   // url -> { img, ok, failed }
+    const snsImgCache = {};   // url -> { img, ok, tainted, failed }
 
     // デッキ名の表記ゆれを吸収（全角半角・引用符・空白）
     function normKey(s) {
@@ -265,31 +261,35 @@
 
     /* ========== SNS用画像（1920×1080）========== */
 
-    // カード画像の取得（公式サイトの画像URLから読み込む）
     let deckImgState = {};       // デッキ名 -> 状態（画面下の診断表示用）
 
     function getSnsImage(deckName) {
       const info = getRideInfo(deckName);
       if (!info) { deckImgState[deckName] = '未登録'; return null; }
       if (!info.画像URL) { deckImgState[deckName] = '番号未設定'; return null; }
-
       const url = info.画像URL;
       let e = snsImgCache[url];
       if (!e) {
-        e = { img: null, ok: false, failed: false };
+        e = { img: null, ok: false, tainted: false, failed: false };
         snsImgCache[url] = e;
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => {
-          if (img.naturalWidth > 0) { e.img = img; e.ok = true; renderSnsCanvas(); }
+        const tryLoad = (cors) => {
+          const img = new Image();
+          if (cors) img.crossOrigin = 'anonymous';
+          img.onload = () => {
+            if (img.naturalWidth > 0) { e.img = img; e.ok = true; e.tainted = !cors; renderSnsCanvas(); }
+          };
+          img.onerror = () => {
+            if (cors) tryLoad(false); else { e.failed = true; renderSnsCanvas(); }
+          };
+          img.src = url;
         };
-        img.onerror = () => { e.failed = true; renderSnsCanvas(); };
-        img.src = url;
+        tryLoad(true);
       }
-      if (e.ok) { deckImgState[deckName] = 'OK'; return e.img; }
-      deckImgState[deckName] = e.failed
-        ? '読み込み失敗（カード番号の誤り、または公式側が許可していない）'
-        : '読み込み中';
+      if (e.ok) {
+        deckImgState[deckName] = e.tainted ? '表示のみ' : 'OK';
+        return e.img;
+      }
+      deckImgState[deckName] = e.failed ? '読み込み失敗' : '読み込み中';
       return null;
     }
 
@@ -320,9 +320,8 @@
       return { x: g.cx + Math.cos(mid) * g.R * 0.6, y: g.cy + Math.sin(mid) * g.R * 0.6 };
     }
 
-    // target を渡すと、そのcanvasに描く（書き出し用の作業canvas）。省略時は画面のプレビュー
-    function renderSnsCanvas(target) {
-      const cv = (target && target.getContext) ? target : document.getElementById('snsCanvas');
+    function renderSnsCanvas() {
+      const cv = document.getElementById('snsCanvas');
       if (!cv) return;
       const ctx = cv.getContext('2d');
       const W = 1920, H = 1080;
@@ -470,7 +469,7 @@
         ctx.textBaseline = 'alphabetic';
       });
 
-      // 5) 調整モード：選択中の項目を点線で囲む（書き出し時は出ない）
+      // 5) 調整モード：選択中の項目を点線で囲む
       if (adjustMode && selectedIdx !== null) {
         const m = mids.find(x => x.s.srcIndex === selectedIdx);
         if (m) {
@@ -490,13 +489,12 @@
     function updateImgStatus(top) {
       const el = document.getElementById('imgStatus');
       if (!el) return;
-      const states = top.map(d => [d.name, deckImgState[d.name]]);
-      const bad = states.filter(([, st]) => st && st !== 'OK');
+      const bad = top
+        .map(d => [d.name, deckImgState[d.name]])
+        .filter(([, st]) => st && st !== 'OK');
       el.textContent = bad.length
         ? '画像の状態：' + bad.map(([n, st]) => `${n}（${st}）`).join('、')
         : '画像の状態：すべて表示OK';
-      const credit = document.getElementById('credit');
-      if (credit) credit.style.display = states.some(([, st]) => st === 'OK') ? 'block' : 'none';
     }
 
     function scheduleRender() {
@@ -572,33 +570,6 @@
         const f = e.deltaY < 0 ? 1.08 : 1 / 1.08;
         setZoom(selectedIdx, imageAdj[selectedIdx].zoom * f);
       }, { passive: false });
-    }
-
-    function downloadSNSImage() {
-      if (!sortedData.length) return alert('先にCSVを集計してください');
-      // 調整用の点線が写り込まないよう、一時的にOFF相当にして、作業用canvasに描いて書き出す
-      const prevAdjust = adjustMode;
-      adjustMode = false;
-      try {
-        const c = document.createElement('canvas');
-        c.width = 1920; c.height = 1080;
-        renderSnsCanvas(c);
-        c.toBlob((blob) => {
-          if (!blob) return alert('画像の書き出しに失敗しました');
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = 'deck_usage_sns.png';
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-        }, 'image/png');
-      } catch (err) {
-        alert('画像の書き出しに失敗しました');
-      } finally {
-        adjustMode = prevAdjust;
-        renderSnsCanvas();
-      }
     }
 
     window.addEventListener('load', () => {
