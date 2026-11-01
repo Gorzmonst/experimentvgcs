@@ -16,9 +16,20 @@
     button { padding: 8px 16px; margin: 5px 5px 5px 0; cursor: pointer; }
     #adjustModeBtn.active { background: #e74c3c; color: white; }
     #adjustHint { color: #666; font-size: 0.9em; display: none; }
+    #adjustPanel {
+      display: none; margin: 8px 0; padding: 8px 12px;
+      border: 1px solid #ddd; border-radius: 6px; background: #fafafa;
+    }
+    #adjustPanel input[type=range] { width: 220px; vertical-align: middle; }
     #snsCanvas { width: 100%; height: auto; display: block; border: 1px solid #ccc; background: #10162b; }
     #snsCanvas.adjusting { cursor: grab; touch-action: none; }
     #snsCanvas.dragging { cursor: grabbing; }
+    #verInfo {
+      position: fixed; right: 8px; bottom: 6px; z-index: 10;
+      font-size: 11px; line-height: 1.4; color: #888; text-align: right;
+      background: rgba(255,255,255,0.85); padding: 2px 6px; border-radius: 4px;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -39,26 +50,59 @@
 
   <p>
     <button id="adjustModeBtn" onclick="toggleAdjustMode()">画像調整モード: OFF</button>
-    <button onclick="resetOffsets()">画像位置をリセット</button>
+    <button onclick="resetAll()">全画像の位置・拡大率をリセット</button>
   </p>
-  <p id="adjustHint">調整モード中：円グラフ上のカード画像をドラッグ（スマホはタップしたまま移動）して位置を調整できます</p>
+  <p id="adjustHint">調整モード中：円グラフの項目をタップして選択し、そのままドラッグで画像の位置を動かせます。拡大・縮小はスライダー（PCはマウスホイールも可）。項目の外にはみ出した部分は表示されません。</p>
+  <div id="adjustPanel">
+    <div id="selName" style="margin-bottom:4px;">円グラフの項目をタップして選択してください</div>
+    拡大率 <input type="range" id="zoomSlider" min="30" max="500" step="5" value="100" oninput="onZoomInput(this.value)">
+    <span id="zoomVal">100%</span>
+    <button onclick="resetSelected()">この画像をリセット</button>
+  </div>
 
   <canvas id="snsCanvas" width="1920" height="1080"></canvas>
   <p id="imgStatus" style="font-size:0.9em;color:#555;"></p>
+  <div id="verInfo"></div>
   <p><button onclick="downloadSNSImage()">SNS用画像をダウンロード（1920×1080）</button></p>
 
   <script>
+    // 画面右下に出る更新情報。コードを直したら APP_VERSION も書き換える
+    const APP_VERSION = '2026.11.01-6';
+
+    function fmtJst(d) {
+      if (!d || isNaN(d)) return '不明';
+      return d.toLocaleString('ja-JP', {
+        timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit'
+      });
+    }
+    let csvLastModified = null;
+    function updateVerInfo() {
+      const el = document.getElementById('verInfo');
+      if (!el) return;
+      el.innerHTML =
+        `ver ${APP_VERSION}<br>ページ更新: ${fmtJst(new Date(document.lastModified))}` +
+        (csvLastModified ? `<br>ridelines.csv更新: ${fmtJst(csvLastModified)}` : '');
+    }
+
+    const FONT = '"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",Meiryo,sans-serif';
+
+    // 円グラフ（SNS画像の右側）の位置・大きさ
+    const PIE = { cx: 1440, cy: 540, R: 420 };
+    // カード画像のうち「顔」に当たる位置（画像の幅・高さに対する割合）。ここが各項目の中心に来る
+    const FACE = { x: 0.5, y: 0.35 };
+    const ZOOM_MIN = 0.3, ZOOM_MAX = 5;
+
     let rideMap = {};
     let sortedData = [];
     let totalCount = 0;
-    let imageOffsets = [];   // sortedDataと同じ並び。値はSNS画像(1920×1080)上のピクセル
+    let imageAdj = [];        // sortedDataと同じ並び。{dx, dy, zoom}（dx,dyはSNS画像上のピクセル）
     let adjustMode = false;
+    let selectedIdx = null;   // 調整中のデッキ（sortedDataの添字）
     let dragging = null;
-    let hitBoxes = [];       // 円グラフ上のカード画像の位置（クリック判定用）
+    let sliceGeoms = [];      // 描画した各項目の扇形（クリック判定用）
     let rafPending = false;
-
-    const FONT = '"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",Meiryo,sans-serif';
-    const snsImgCache = {}; // url -> { img, ok }
+    const snsImgCache = {};   // url -> { img, ok, tainted, failed }
 
     // デッキ名の表記ゆれを吸収（全角半角・引用符・空白）
     function normKey(s) {
@@ -85,6 +129,8 @@
       fetch('./ridelines.csv')
         .then(r => {
           if (!r.ok) throw new Error();
+          const lm = r.headers.get('Last-Modified');
+          if (lm) { csvLastModified = new Date(lm); updateVerInfo(); }
           return r.text();
         })
         .then(text => {
@@ -122,20 +168,6 @@
       return rideMap[normKey(deckName)] || null;
     }
 
-    function toggleAdjustMode() {
-      adjustMode = !adjustMode;
-      const btn = document.getElementById('adjustModeBtn');
-      btn.textContent = `画像調整モード: ${adjustMode ? 'ON' : 'OFF'}`;
-      btn.classList.toggle('active', adjustMode);
-      document.getElementById('adjustHint').style.display = adjustMode ? 'block' : 'none';
-      document.getElementById('snsCanvas').classList.toggle('adjusting', adjustMode);
-    }
-
-    function resetOffsets() {
-      imageOffsets = imageOffsets.map(() => ({ dx: 0, dy: 0 }));
-      renderSnsCanvas();
-    }
-
     function processCSV() {
       const file = document.getElementById('csvFile').files[0];
       const columnName = document.getElementById('deckColumn').value.trim();
@@ -167,10 +199,65 @@
               percent: (count / total * 100).toFixed(1)
             }));
 
-          imageOffsets = sortedData.map(() => ({ dx: 0, dy: 0 }));
+          imageAdj = sortedData.map(() => ({ dx: 0, dy: 0, zoom: 1 }));
+          selectedIdx = null;
+          updateAdjustPanel();
           renderSnsCanvas();
         }
       });
+    }
+
+    /* ========== 画像調整（位置・拡大率・リセット）========== */
+
+    function toggleAdjustMode() {
+      adjustMode = !adjustMode;
+      const btn = document.getElementById('adjustModeBtn');
+      btn.textContent = `画像調整モード: ${adjustMode ? 'ON' : 'OFF'}`;
+      btn.classList.toggle('active', adjustMode);
+      document.getElementById('adjustHint').style.display = adjustMode ? 'block' : 'none';
+      document.getElementById('adjustPanel').style.display = adjustMode ? 'block' : 'none';
+      document.getElementById('snsCanvas').classList.toggle('adjusting', adjustMode);
+      renderSnsCanvas();
+    }
+
+    function updateAdjustPanel() {
+      const name = document.getElementById('selName');
+      const slider = document.getElementById('zoomSlider');
+      const val = document.getElementById('zoomVal');
+      if (selectedIdx === null || !imageAdj[selectedIdx]) {
+        name.textContent = '円グラフの項目をタップして選択してください';
+        slider.disabled = true;
+        return;
+      }
+      slider.disabled = false;
+      name.textContent = `選択中：${sortedData[selectedIdx].name}`;
+      const z = Math.round(imageAdj[selectedIdx].zoom * 100);
+      slider.value = z;
+      val.textContent = `${z}%`;
+    }
+
+    function setZoom(idx, z) {
+      imageAdj[idx].zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+      updateAdjustPanel();
+      scheduleRender();
+    }
+
+    function onZoomInput(v) {
+      if (selectedIdx === null) return;
+      setZoom(selectedIdx, Number(v) / 100);
+    }
+
+    function resetSelected() {
+      if (selectedIdx === null || !imageAdj[selectedIdx]) return;
+      imageAdj[selectedIdx] = { dx: 0, dy: 0, zoom: 1 };
+      updateAdjustPanel();
+      renderSnsCanvas();
+    }
+
+    function resetAll() {
+      imageAdj = imageAdj.map(() => ({ dx: 0, dy: 0, zoom: 1 }));
+      updateAdjustPanel();
+      renderSnsCanvas();
     }
 
     /* ========== SNS用画像（1920×1080）========== */
@@ -217,69 +304,24 @@
       return t + '…';
     }
 
-    /* ----- カード画像を、自分の項目（扇形）からはみ出さないように置くための計算 ----- */
-    const TWO_PI = Math.PI * 2;
-    const PAD = 8; // 扇形の縁からあける余白(px)
-
-    function pointInSector(px, py, g) {
-      const dx = px - g.cx, dy = py - g.cy;
-      const r = Math.hypot(dx, dy);
-      if (r > g.R - PAD) return false;
-      const span = g.a1 - g.a0;
-      if (span >= TWO_PI - 1e-6) return true; // 項目が1つだけ（円全体）
-      let rel = Math.atan2(dy, dx) - g.a0;
-      while (rel < 0) rel += TWO_PI;
-      while (rel >= TWO_PI) rel -= TWO_PI;
-      if (rel > span) return false;
-      const rel1 = span - rel;
-      const d0 = rel < Math.PI / 2 ? r * Math.sin(rel) : r;
-      const d1 = rel1 < Math.PI / 2 ? r * Math.sin(rel1) : r;
-      return d0 >= PAD && d1 >= PAD;
+    function sectorPath(ctx, g) {
+      ctx.beginPath();
+      ctx.moveTo(g.cx, g.cy);
+      ctx.arc(g.cx, g.cy, g.R, g.a0, g.a1);
+      ctx.closePath();
     }
 
-    // 画像（中心x,y・幅w・高さh）が扇形に完全に収まるか（外周と中心を細かく調べる）
-    function rectFits(x, y, w, h, g) {
-      if (!pointInSector(x, y, g)) return false;
-      const N = 8, hw = w / 2, hh = h / 2;
-      for (let i = 0; i <= N; i++) {
-        const t = i / N;
-        const px = x - hw + w * t, py = y - hh + h * t;
-        if (!pointInSector(px, y - hh, g) || !pointInSector(px, y + hh, g)) return false;
-        if (!pointInSector(x - hw, py, g) || !pointInSector(x + hw, py, g)) return false;
-      }
-      return true;
+    // 項目の幅に応じた「拡大率100%」の画像の幅（狭い項目ほど顔がアップになる）
+    function baseImageWidth(g) {
+      const span = Math.min(g.a1 - g.a0, Math.PI);
+      const chord = 2 * 0.6 * g.R * Math.sin(span / 2);
+      return Math.max(g.R * 0.45, Math.min(g.R * 1.1, chord * 3.2));
     }
 
-    // 初期位置とサイズ：収まる中で一番大きく、扇形の中ほどに置く（狭い項目では画像を小さくする）
-    function placeImage(g, mid) {
-      const baseW = g.R * 0.2;
-      const rs = [];
-      for (let f = 0.2; f <= 0.9; f += 0.02) rs.push(f);
-      rs.sort((a, b) => Math.abs(a - 0.58) - Math.abs(b - 0.58));
-      for (let sc = 1; sc >= 0.3; sc -= 0.05) {
-        const w = baseW * sc, h = w * 1.4;
-        for (const f of rs) {
-          const x = g.cx + Math.cos(mid) * g.R * f;
-          const y = g.cy + Math.sin(mid) * g.R * f;
-          if (rectFits(x, y, w, h, g)) return { x, y, w, h };
-        }
-      }
-      return null; // 小さくしても収まらない場合は画像を出さない
-    }
-
-    // prevから希望位置wantへ動かす。はみ出すなら縁に沿って動き、動けなければ手前で止める
-    function clampMove(prev, want, w, h, g) {
-      if (rectFits(want.x, want.y, w, h, g)) return want;
-      const ax = { x: want.x, y: prev.y };
-      if (rectFits(ax.x, ax.y, w, h, g)) return ax;
-      const ay = { x: prev.x, y: want.y };
-      if (rectFits(ay.x, ay.y, w, h, g)) return ay;
-      let lo = 0, hi = 1;
-      for (let i = 0; i < 16; i++) {
-        const m = (lo + hi) / 2;
-        if (rectFits(prev.x + (want.x - prev.x) * m, prev.y + (want.y - prev.y) * m, w, h, g)) lo = m; else hi = m;
-      }
-      return { x: prev.x + (want.x - prev.x) * lo, y: prev.y + (want.y - prev.y) * lo };
+    // 画像の「顔」の基準位置：項目の中ほど
+    function anchorPoint(g) {
+      const mid = (g.a0 + g.a1) / 2;
+      return { x: g.cx + Math.cos(mid) * g.R * 0.6, y: g.cy + Math.sin(mid) * g.R * 0.6 };
     }
 
     function renderSnsCanvas() {
@@ -287,7 +329,7 @@
       if (!cv) return;
       const ctx = cv.getContext('2d');
       const W = 1920, H = 1080;
-      hitBoxes = [];
+      sliceGeoms = [];
 
       // 背景
       ctx.fillStyle = '#10162b';
@@ -372,51 +414,50 @@
       });
 
       // ----- 右：円グラフ -----
-      const pcx = 1440, pcy = H / 2, R = 420;
+      const { cx: pcx, cy: pcy, R } = PIE;
       let start = -Math.PI / 2;
       const mids = [];
       slices.forEach(s => {
         const ang = s.count / totalCount * Math.PI * 2;
-        ctx.beginPath();
-        ctx.moveTo(pcx, pcy);
-        ctx.arc(pcx, pcy, R, start, start + ang);
-        ctx.closePath();
-        ctx.fillStyle = s.color;
-        ctx.fill();
-        ctx.lineWidth = 4;
-        ctx.strokeStyle = '#10162b';
-        ctx.stroke();
-        mids.push({ s, mid: start + ang / 2, frac: s.count / totalCount,
-                    g: { cx: pcx, cy: pcy, R, a0: start, a1: start + ang } });
+        const g = { cx: pcx, cy: pcy, R, a0: start, a1: start + ang };
+        mids.push({ s, g, mid: start + ang / 2, frac: s.count / totalCount });
+        sliceGeoms.push({ srcIndex: s.srcIndex, g });
         start += ang;
       });
 
-      // カード画像（自分の項目の中に収まるように配置）
-      mids.forEach(({ s, mid, g }) => {
+      // 1) 塗りつぶし
+      mids.forEach(({ s, g }) => {
+        sectorPath(ctx, g);
+        ctx.fillStyle = s.color;
+        ctx.fill();
+      });
+
+      // 2) カード画像（自分の項目の形でマスク：はみ出した部分は表示されない）
+      mids.forEach(({ s, g }) => {
         if (s.srcIndex < 0) return;
         const img = getSnsImage(s.name);
         if (!img) return;
-        const pl = placeImage(g, mid);
-        if (!pl) return;
-        const off = imageOffsets[s.srcIndex] || (imageOffsets[s.srcIndex] = { dx: 0, dy: 0 });
-        let c = { x: pl.x + off.dx, y: pl.y + off.dy };
-        if (!rectFits(c.x, c.y, pl.w, pl.h, g)) {
-          c = clampMove({ x: pl.x, y: pl.y }, c, pl.w, pl.h, g); // 項目の外に出ていたら内側へ戻す
-          off.dx = c.x - pl.x; off.dy = c.y - pl.y;
-        }
-        try { ctx.drawImage(img, c.x - pl.w / 2, c.y - pl.h / 2, pl.w, pl.h); } catch (e) { return; }
-        if (adjustMode) {
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-          ctx.setLineDash([8, 6]);
-          ctx.strokeRect(c.x - pl.w / 2, c.y - pl.h / 2, pl.w, pl.h);
-          ctx.setLineDash([]);
-        }
-        hitBoxes.push({ srcIndex: s.srcIndex, x: c.x - pl.w / 2, y: c.y - pl.h / 2, w: pl.w, h: pl.h,
-                        cx: c.x, cy: c.y, defX: pl.x, defY: pl.y, g });
+        const adj = imageAdj[s.srcIndex] || (imageAdj[s.srcIndex] = { dx: 0, dy: 0, zoom: 1 });
+        const w = baseImageWidth(g) * adj.zoom;
+        const h = w * (img.naturalHeight / img.naturalWidth);
+        const a = anchorPoint(g);
+        const fx = a.x + adj.dx, fy = a.y + adj.dy;   // 画像の「顔」の位置
+        ctx.save();
+        sectorPath(ctx, g);
+        ctx.clip();
+        try { ctx.drawImage(img, fx - FACE.x * w, fy - FACE.y * h, w, h); } catch (e) { /* skip */ }
+        ctx.restore();
       });
 
-      // 割合ラベル（画像より手前に描いて読めるようにする）
+      // 3) 項目の境目の線
+      mids.forEach(({ g }) => {
+        sectorPath(ctx, g);
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#10162b';
+        ctx.stroke();
+      });
+
+      // 4) 割合ラベル
       mids.forEach(({ s, mid, frac }) => {
         if (frac < 0.04) return;
         const x = pcx + Math.cos(mid) * R * 0.88;
@@ -431,6 +472,19 @@
         ctx.fillText(`${s.percent}%`, x, y);
         ctx.textBaseline = 'alphabetic';
       });
+
+      // 5) 調整モード：選択中の項目を点線で囲む（書き出し時は出ない）
+      if (adjustMode && selectedIdx !== null) {
+        const m = mids.find(x => x.s.srcIndex === selectedIdx);
+        if (m) {
+          sectorPath(ctx, m.g);
+          ctx.lineWidth = 5;
+          ctx.strokeStyle = '#ffffff';
+          ctx.setLineDash([14, 10]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
       ctx.textAlign = 'left';
       updateImgStatus(top);
     }
@@ -453,7 +507,22 @@
       requestAnimationFrame(() => { rafPending = false; renderSnsCanvas(); });
     }
 
-    /* ========== プレビューを直接ドラッグして画像位置を調整 ========== */
+    /* ========== プレビューを直接操作（ドラッグで位置、ホイールで拡大縮小）========== */
+
+    // 点(x,y)が入っている項目（画像のあるもの）を返す
+    function sliceAt(x, y) {
+      for (const { srcIndex, g } of sliceGeoms) {
+        if (srcIndex < 0) continue;
+        const dx = x - g.cx, dy = y - g.cy;
+        if (Math.hypot(dx, dy) > g.R) continue;
+        const span = g.a1 - g.a0;
+        let rel = Math.atan2(dy, dx) - g.a0;
+        while (rel < 0) rel += Math.PI * 2;
+        while (rel >= Math.PI * 2) rel -= Math.PI * 2;
+        if (rel <= span || span >= Math.PI * 2 - 1e-6) return srcIndex;
+      }
+      return null;
+    }
 
     function setupDrag() {
       const cv = document.getElementById('snsCanvas');
@@ -469,29 +538,24 @@
       cv.addEventListener('pointerdown', (e) => {
         if (!adjustMode) return;
         const p = pos(e);
-        // 手前（後に描いたもの）から判定。少し余白を持たせる
-        const m = 12;
-        for (let i = hitBoxes.length - 1; i >= 0; i--) {
-          const b = hitBoxes[i];
-          if (p.x >= b.x - m && p.x <= b.x + b.w + m && p.y >= b.y - m && p.y <= b.y + b.h + m) {
-            dragging = { box: b, startX: p.x, startY: p.y, startCx: b.cx, startCy: b.cy, cur: { x: b.cx, y: b.cy } };
-            cv.setPointerCapture(e.pointerId);
-            cv.classList.add('dragging');
-            e.preventDefault();
-            return;
-          }
-        }
+        const idx = sliceAt(p.x, p.y);
+        if (idx === null) return;
+        selectedIdx = idx;
+        updateAdjustPanel();
+        const a = imageAdj[idx];
+        dragging = { index: idx, startX: p.x, startY: p.y, startDx: a.dx, startDy: a.dy };
+        cv.setPointerCapture(e.pointerId);
+        cv.classList.add('dragging');
+        e.preventDefault();
+        scheduleRender();
       });
 
       cv.addEventListener('pointermove', (e) => {
         if (!dragging) return;
         const p = pos(e);
-        const b = dragging.box;
-        const want = { x: dragging.startCx + (p.x - dragging.startX), y: dragging.startCy + (p.y - dragging.startY) };
-        // 自分の項目の外には出ないように制限
-        dragging.cur = clampMove(dragging.cur, want, b.w, b.h, b.g);
-        imageOffsets[b.srcIndex].dx = dragging.cur.x - b.defX;
-        imageOffsets[b.srcIndex].dy = dragging.cur.y - b.defY;
+        const a = imageAdj[dragging.index];
+        a.dx = dragging.startDx + (p.x - dragging.startX);
+        a.dy = dragging.startDy + (p.y - dragging.startY);
         scheduleRender();
         e.preventDefault();
       });
@@ -502,11 +566,19 @@
       };
       cv.addEventListener('pointerup', end);
       cv.addEventListener('pointercancel', end);
+
+      // PC：マウスホイールで拡大縮小（選択中の画像）
+      cv.addEventListener('wheel', (e) => {
+        if (!adjustMode || selectedIdx === null || !imageAdj[selectedIdx]) return;
+        e.preventDefault();
+        const f = e.deltaY < 0 ? 1.08 : 1 / 1.08;
+        setZoom(selectedIdx, imageAdj[selectedIdx].zoom * f);
+      }, { passive: false });
     }
 
     function downloadSNSImage() {
       if (!sortedData.length) return alert('先にCSVを集計してください');
-      // 調整用の枠線が写り込まないよう、一時的にOFF相当で描き直して書き出す
+      // 調整用の点線が写り込まないよう、一時的にOFF相当で描き直して書き出す
       const prev = adjustMode;
       adjustMode = false;
       const cv = document.getElementById('snsCanvas');
@@ -538,6 +610,8 @@
 
     window.addEventListener('load', () => {
       setupDrag();
+      updateAdjustPanel();
+      updateVerInfo();
       loadRideLines();
       renderSnsCanvas();
     });
