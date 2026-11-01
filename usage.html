@@ -67,7 +67,7 @@
 
   <script>
     // 画面右下に出る更新情報。コードを直したら APP_VERSION も書き換える
-    const APP_VERSION = '2026.11.01-6';
+    const APP_VERSION = '2026.11.01-8';
 
     function fmtJst(d) {
       if (!d || isNaN(d)) return '不明';
@@ -102,7 +102,7 @@
     let dragging = null;
     let sliceGeoms = [];      // 描画した各項目の扇形（クリック判定用）
     let rafPending = false;
-    const snsImgCache = {};   // url -> { img, ok, tainted, failed }
+    const snsImgCache = {};   // url -> { img, ok, failed }
 
     // デッキ名の表記ゆれを吸収（全角半角・引用符・空白）
     function normKey(s) {
@@ -262,8 +262,7 @@
 
     /* ========== SNS用画像（1920×1080）========== */
 
-    // カード画像の読み込み。まずCORS付き（書き出し可能）で試し、失敗したらCORS無しで表示だけ行う
-    let exportMode = false;      // trueの間は「書き出し不可の画像」を描かない
+    // カード画像の読み込み。書き出しできる画像（CORS許可）だけを表示する
     let deckImgState = {};       // デッキ名 -> 状態（画面下の診断表示用）
 
     function getSnsImage(deckName) {
@@ -273,27 +272,18 @@
       const url = info.画像URL;
       let e = snsImgCache[url];
       if (!e) {
-        e = { img: null, ok: false, tainted: false, failed: false };
+        e = { img: null, ok: false, failed: false };
         snsImgCache[url] = e;
-        const tryLoad = (cors) => {
-          const img = new Image();
-          if (cors) img.crossOrigin = 'anonymous';
-          img.onload = () => {
-            if (img.naturalWidth > 0) { e.img = img; e.ok = true; e.tainted = !cors; renderSnsCanvas(); }
-          };
-          img.onerror = () => {
-            if (cors) tryLoad(false); else { e.failed = true; renderSnsCanvas(); }
-          };
-          img.src = url;
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          if (img.naturalWidth > 0) { e.img = img; e.ok = true; renderSnsCanvas(); }
         };
-        tryLoad(true);
+        img.onerror = () => { e.failed = true; renderSnsCanvas(); };
+        img.src = url;
       }
-      if (e.ok) {
-        if (e.tainted && exportMode) { deckImgState[deckName] = '書き出し不可'; return null; }
-        deckImgState[deckName] = e.tainted ? '表示のみ（書き出し不可）' : 'OK';
-        return e.img;
-      }
-      deckImgState[deckName] = e.failed ? '読み込み失敗' : '読み込み中';
+      if (e.ok) { deckImgState[deckName] = 'OK'; return e.img; }
+      deckImgState[deckName] = e.failed ? '読み込み失敗（URLの誤り、または公式側が許可していない）' : '読み込み中';
       return null;
     }
 
@@ -324,8 +314,9 @@
       return { x: g.cx + Math.cos(mid) * g.R * 0.6, y: g.cy + Math.sin(mid) * g.R * 0.6 };
     }
 
-    function renderSnsCanvas() {
-      const cv = document.getElementById('snsCanvas');
+    // target を渡すと、そのcanvasに描く（書き出し用の作業canvas）。省略時は画面のプレビュー
+    function renderSnsCanvas(target) {
+      const cv = (target && target.getContext) ? target : document.getElementById('snsCanvas');
       if (!cv) return;
       const ctx = cv.getContext('2d');
       const W = 1920, H = 1080;
@@ -578,32 +569,27 @@
 
     function downloadSNSImage() {
       if (!sortedData.length) return alert('先にCSVを集計してください');
-      // 調整用の点線が写り込まないよう、一時的にOFF相当で描き直して書き出す
-      const prev = adjustMode;
+      // 調整用の点線が写り込まないよう、一時的にOFF相当にして、作業用canvasに描いて書き出す
+      const prevAdjust = adjustMode;
       adjustMode = false;
-      const cv = document.getElementById('snsCanvas');
-      const save = (url) => {
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'deck_usage_sns.png';
-        a.click();
-      };
       try {
-        renderSnsCanvas();
-        try {
-          save(cv.toDataURL('image/png'));
-        } catch (e) {
-          // 公式サイトの画像がCORS非対応だと、そのままでは書き出せない → 画像なしで書き出す
-          exportMode = true;
-          renderSnsCanvas();
-          save(cv.toDataURL('image/png'));
-          alert('公式サイトの画像は書き出しが許可されていないため、カード画像なしで保存しました。\n画像入りにするには、画像を自分のサイトに置く必要があります。');
-        }
-      } catch (e) {
+        const c = document.createElement('canvas');
+        c.width = 1920; c.height = 1080;
+        renderSnsCanvas(c);
+        c.toBlob((blob) => {
+          if (!blob) return alert('画像の書き出しに失敗しました');
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'deck_usage_sns.png';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+        }, 'image/png');
+      } catch (err) {
         alert('画像の書き出しに失敗しました');
       } finally {
-        exportMode = false;
-        adjustMode = prev;
+        adjustMode = prevAdjust;
         renderSnsCanvas();
       }
     }
