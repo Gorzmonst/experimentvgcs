@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>使用率分布</title>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
   <style>
     body {
       font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
@@ -14,13 +13,12 @@
       padding: 20px;
       line-height: 1.6;
     }
-    #list li { margin: 8px 0; }
-    .sns-area { margin-top: 30px; border: 1px solid #ddd; padding: 15px; background: #fafafa; }
-    button { padding: 8px 16px; margin: 5px; cursor: pointer; }
+    button { padding: 8px 16px; margin: 5px 5px 5px 0; cursor: pointer; }
     #adjustModeBtn.active { background: #e74c3c; color: white; }
     #adjustHint { color: #666; font-size: 0.9em; display: none; }
-    #pieChart { touch-action: none; }
     #snsCanvas { width: 100%; height: auto; display: block; border: 1px solid #ccc; background: #10162b; }
+    #snsCanvas.adjusting { cursor: grab; touch-action: none; }
+    #snsCanvas.dragging { cursor: grabbing; }
   </style>
 </head>
 <body>
@@ -32,47 +30,34 @@
     デッキ名カラム：<input type="text" id="deckColumn" value="使用されるデッキのG3" style="width:200px">
     <button onclick="processCSV()">集計</button>
   </p>
-
   <p id="rideStatus">ライドラインマッピング読み込み中...</p>
+
+  <p>
+    大会名（任意）：<input type="text" id="eventName" style="width:260px" oninput="renderSnsCanvas()">
+    リスト表示数：<input type="number" id="snsTop" value="10" min="3" max="12" style="width:60px" oninput="renderSnsCanvas()">
+  </p>
 
   <p>
     <button id="adjustModeBtn" onclick="toggleAdjustMode()">画像調整モード: OFF</button>
     <button onclick="resetOffsets()">画像位置をリセット</button>
   </p>
-  <p id="adjustHint">調整モード中：画像をドラッグ（スマホはタップしたまま移動）して位置を調整できます。SNS用画像にも反映されます</p>
+  <p id="adjustHint">調整モード中：円グラフ上のカード画像をドラッグ（スマホはタップしたまま移動）して位置を調整できます</p>
 
-  <div id="list"></div>
-  <canvas id="pieChart" style="max-width:700px; margin:20px auto; display:block;"></canvas>
-
-  <div class="sns-area">
-    <h2>SNS投稿用画像（1920×1080）</h2>
-    <p>
-      大会名（任意）：<input type="text" id="eventName" style="width:260px" oninput="renderSnsCanvas()">
-      リスト表示数：<input type="number" id="snsTop" value="10" min="3" max="12" style="width:60px" oninput="renderSnsCanvas()">
-    </p>
-    <canvas id="snsCanvas" width="1920" height="1080"></canvas>
-    <button onclick="downloadSNSImage()">SNS用画像をダウンロード</button>
-  </div>
+  <canvas id="snsCanvas" width="1920" height="1080"></canvas>
+  <p><button onclick="downloadSNSImage()">SNS用画像をダウンロード（1920×1080）</button></p>
 
   <script>
     let rideMap = {};
-    let chart = null;
     let sortedData = [];
     let totalCount = 0;
-    let imageOffsets = [];
+    let imageOffsets = [];   // sortedDataと同じ並び。値はSNS画像(1920×1080)上のピクセル
     let adjustMode = false;
     let dragging = null;
-    let imgElements = [];
+    let hitBoxes = [];       // 円グラフ上のカード画像の位置（クリック判定用）
+    let rafPending = false;
 
     const FONT = '"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",Meiryo,sans-serif';
     const snsImgCache = {}; // url -> { img, ok }
-
-    // HTMLエスケープ（CSVの文字列をinnerHTMLに入れるため）
-    function esc(s) {
-      return String(s).replace(/[&<>"']/g, c => (
-        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-      ));
-    }
 
     // デッキ名の表記ゆれを吸収（全角半角・引用符・空白）
     function normKey(s) {
@@ -109,6 +94,7 @@
               buildRideMap(res.data);
               document.getElementById('rideStatus').textContent =
                 `ライドラインマッピング読み込み完了（${res.data.length}件）`;
+              renderSnsCanvas();
             }
           });
         })
@@ -138,19 +124,15 @@
     function toggleAdjustMode() {
       adjustMode = !adjustMode;
       const btn = document.getElementById('adjustModeBtn');
-      const hint = document.getElementById('adjustHint');
       btn.textContent = `画像調整モード: ${adjustMode ? 'ON' : 'OFF'}`;
       btn.classList.toggle('active', adjustMode);
-      hint.style.display = adjustMode ? 'block' : 'none';
-      if (chart) {
-        chart.options.plugins.tooltip.enabled = !adjustMode;
-        chart.update();
-      }
+      document.getElementById('adjustHint').style.display = adjustMode ? 'block' : 'none';
+      document.getElementById('snsCanvas').classList.toggle('adjusting', adjustMode);
     }
 
     function resetOffsets() {
       imageOffsets = imageOffsets.map(() => ({ dx: 0, dy: 0 }));
-      if (chart) chart.update('none');
+      renderSnsCanvas();
     }
 
     function processCSV() {
@@ -176,8 +158,6 @@
           if (!total) return alert('データが見つかりません。カラム名を確認してください');
 
           totalCount = total;
-
-          // 使用率の高い順にソート
           sortedData = Object.entries(counts)
             .sort((a, b) => b[1] - a[1])
             .map(([name, count]) => ({
@@ -186,188 +166,15 @@
               percent: (count / total * 100).toFixed(1)
             }));
 
-          // 箇条書き（高い順）
-          document.getElementById('list').innerHTML =
-            `<h2>使用率上位（全${total}人）</h2><ul>` +
-            sortedData.map(d => `<li><strong>${esc(d.name)}</strong>：${d.count}人（${d.percent}%）</li>`).join('') +
-            '</ul>';
-
           imageOffsets = sortedData.map(() => ({ dx: 0, dy: 0 }));
-          createPieChart();
+          renderSnsCanvas();
         }
       });
-    }
-
-    function createPieChart() {
-      if (chart) chart.destroy();
-
-      const labels = sortedData.map(d => d.name);
-      const values = sortedData.map(d => d.count);
-      const colors = labels.map((_, i) => `hsl(${i * 360 / labels.length}, 70%, 55%)`);
-
-      // この円グラフのcanvasは画像として書き出さないので crossOrigin は付けない
-      // （付けると公式側がCORS非対応の場合に読み込み自体が失敗するため）
-      imgElements = sortedData.map(d => {
-        const info = getRideInfo(d.name);
-        if (!info || !info.画像URL) return null;
-        const img = new Image();
-        img.onload = () => { if (chart) chart.update('none'); };
-        img.src = info.画像URL;
-        return img;
-      });
-
-      const ctx = document.getElementById('pieChart').getContext('2d');
-      chart = new Chart(ctx, {
-        type: 'pie',
-        data: {
-          labels,
-          datasets: [{
-            data: values,
-            backgroundColor: colors
-          }]
-        },
-        options: {
-          responsive: true,
-          animation: false,
-          plugins: {
-            legend: { position: 'right' },
-            tooltip: { enabled: !adjustMode }
-          }
-        },
-        plugins: [{
-          id: 'imageDrawer',
-          afterDatasetsDraw(c) {
-            const cx = c.ctx;
-            const meta = c.getDatasetMeta(0);
-
-            meta.data.forEach((arc, i) => {
-              const img = imgElements[i];
-              // 読み込み未完了・失敗（naturalWidth 0）の画像はスキップ
-              if (!img || !img.complete || img.naturalWidth === 0) return;
-
-              const midAngle = arc.startAngle + (arc.endAngle - arc.startAngle) / 2;
-              const radius = (arc.outerRadius + arc.innerRadius) / 2 * 0.65;
-              const centerX = c.chartArea.left + (c.chartArea.right - c.chartArea.left) / 2;
-              const centerY = c.chartArea.top + (c.chartArea.bottom - c.chartArea.top) / 2;
-
-              let x = centerX + Math.cos(midAngle) * radius;
-              let y = centerY + Math.sin(midAngle) * radius;
-
-              x += imageOffsets[i]?.dx || 0;
-              y += imageOffsets[i]?.dy || 0;
-
-              const size = 46;
-              cx.save();
-              try {
-                cx.drawImage(img, x - size / 2, y - size / 2, size, size * 1.4);
-              } catch (e) {
-                // 描画に失敗してもグラフ全体は止めない
-              }
-              cx.restore();
-            });
-
-            // SNS用画像も同じタイミングで更新（画像位置の調整をリアルタイム反映）
-            renderSnsCanvas(c);
-          }
-        }]
-      });
-
-      setupDragEvents();
-    }
-
-    function setupDragEvents() {
-      const canvas = chart.canvas;
-
-      // チャート座標（CSSピクセル）で扱う。高解像度ディスプレイ(スマホ等)でもずれない
-      function getMousePos(e) {
-        const rect = canvas.getBoundingClientRect();
-        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        return {
-          x: (clientX - rect.left) * (chart.width / rect.width),
-          y: (clientY - rect.top) * (chart.height / rect.height)
-        };
-      }
-
-      function findNearestImage(pos) {
-        if (!adjustMode) return null;
-        const meta = chart.getDatasetMeta(0);
-        let nearest = null;
-        let minDist = 50;
-
-        meta.data.forEach((arc, i) => {
-          const img = imgElements[i];
-          if (!img || img.naturalWidth === 0) return;
-          const midAngle = arc.startAngle + (arc.endAngle - arc.startAngle) / 2;
-          const radius = (arc.outerRadius + arc.innerRadius) / 2 * 0.65;
-          const centerX = chart.chartArea.left + (chart.chartArea.right - chart.chartArea.left) / 2;
-          const centerY = chart.chartArea.top + (chart.chartArea.bottom - chart.chartArea.top) / 2;
-          let x = centerX + Math.cos(midAngle) * radius + (imageOffsets[i]?.dx || 0);
-          let y = centerY + Math.sin(midAngle) * radius + (imageOffsets[i]?.dy || 0);
-
-          const dist = Math.hypot(pos.x - x, pos.y - y);
-          if (dist < minDist) {
-            minDist = dist;
-            nearest = i;
-          }
-        });
-        return nearest;
-      }
-
-      function onStart(e) {
-        if (!adjustMode) return;
-        e.preventDefault();
-        const pos = getMousePos(e);
-        const idx = findNearestImage(pos);
-        if (idx !== null) {
-          dragging = {
-            index: idx,
-            startX: pos.x,
-            startY: pos.y,
-            startDx: imageOffsets[idx].dx,
-            startDy: imageOffsets[idx].dy
-          };
-        }
-      }
-
-      function onMove(e) {
-        if (!dragging || !adjustMode) return;
-        e.preventDefault();
-        const pos = getMousePos(e);
-        imageOffsets[dragging.index].dx = dragging.startDx + (pos.x - dragging.startX);
-        imageOffsets[dragging.index].dy = dragging.startDy + (pos.y - dragging.startY);
-        chart.update('none');
-      }
-
-      function onEnd() {
-        dragging = null;
-      }
-
-      // chartを作り直すたびにcanvasは同じなので、古いリスナーが重複しないよう差し替える
-      if (canvas._dragHandlers) {
-        const h = canvas._dragHandlers;
-        canvas.removeEventListener('mousedown', h.onStart);
-        canvas.removeEventListener('mousemove', h.onMove);
-        canvas.removeEventListener('mouseup', h.onEnd);
-        canvas.removeEventListener('mouseleave', h.onEnd);
-        canvas.removeEventListener('touchstart', h.onStart);
-        canvas.removeEventListener('touchmove', h.onMove);
-        canvas.removeEventListener('touchend', h.onEnd);
-      }
-      canvas._dragHandlers = { onStart, onMove, onEnd };
-
-      canvas.addEventListener('mousedown', onStart);
-      canvas.addEventListener('mousemove', onMove);
-      canvas.addEventListener('mouseup', onEnd);
-      canvas.addEventListener('mouseleave', onEnd);
-      canvas.addEventListener('touchstart', onStart, { passive: false });
-      canvas.addEventListener('touchmove', onMove, { passive: false });
-      canvas.addEventListener('touchend', onEnd);
     }
 
     /* ========== SNS用画像（1920×1080）========== */
 
-    // SNS画像用のカード画像（CORS付きで読み込む。失敗した場合は描画しない）
+    // カード画像（書き出しできるようCORS付きで読み込む。失敗した場合は描画しない）
     function getSnsImage(deckName) {
       const info = getRideInfo(deckName);
       if (!info || !info.画像URL) return null;
@@ -392,12 +199,12 @@
       return t + '…';
     }
 
-    function renderSnsCanvas(srcChart) {
+    function renderSnsCanvas() {
       const cv = document.getElementById('snsCanvas');
       if (!cv) return;
       const ctx = cv.getContext('2d');
       const W = 1920, H = 1080;
-      const mainChart = srcChart || chart;
+      hitBoxes = [];
 
       // 背景
       ctx.fillStyle = '#10162b';
@@ -460,7 +267,7 @@
         const tx = padX + 46, ty = cy - thumbH / 2;
         const img = s.srcIndex >= 0 ? getSnsImage(s.name) : null;
         if (img) {
-          try { ctx.drawImage(img, tx, ty, thumbW, thumbH); } catch (e) { img && 0; }
+          try { ctx.drawImage(img, tx, ty, thumbW, thumbH); } catch (e) { /* skip */ }
         } else if (s.srcIndex >= 0) {
           ctx.fillStyle = '#2a3358';
           ctx.fillRect(tx, ty, thumbW, thumbH);
@@ -470,7 +277,6 @@
         const nameX = tx + thumbW + 18;
         ctx.textBaseline = 'middle';
         ctx.fillStyle = '#ffffff';
-        ctx.font = `${fontPx}px ${FONT}`;
         const stats = `${s.percent}%（${s.count}人）`;
         ctx.textAlign = 'right';
         ctx.font = `bold ${fontPx}px ${FONT}`;
@@ -501,58 +307,117 @@
         start += ang;
       });
 
-      // カード画像（円グラフ側の調整位置を反映）と割合ラベル
-      let mainR = 0;
-      if (mainChart && mainChart.getDatasetMeta) {
-        const m = mainChart.getDatasetMeta(0);
-        mainR = (m.data[0] && m.data[0].outerRadius) || 0;
-      }
-      const scale = mainR > 0 ? R / mainR : 1;
-      const imgW = R * 0.2, imgH = imgW * 1.4;
-
+      // 割合ラベル → カード画像の順に描く（画像を手前にして、ドラッグしやすくする）
       mids.forEach(({ s, mid, frac }) => {
-        if (s.srcIndex >= 0) {
-          const img = getSnsImage(s.name);
-          if (img) {
-            const off = imageOffsets[s.srcIndex] || { dx: 0, dy: 0 };
-            const x = pcx + Math.cos(mid) * R * 0.58 + off.dx * scale;
-            const y = pcy + Math.sin(mid) * R * 0.58 + off.dy * scale;
-            try { ctx.drawImage(img, x - imgW / 2, y - imgH / 2, imgW, imgH); } catch (e) { /* skip */ }
-          }
+        if (frac < 0.04) return;
+        const x = pcx + Math.cos(mid) * R * 0.88;
+        const y = pcy + Math.sin(mid) * R * 0.88;
+        ctx.font = `bold 32px ${FONT}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = 'rgba(16,22,43,0.85)';
+        ctx.strokeText(`${s.percent}%`, x, y);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(`${s.percent}%`, x, y);
+        ctx.textBaseline = 'alphabetic';
+      });
+
+      const imgW = R * 0.2, imgH = imgW * 1.4;
+      mids.forEach(({ s, mid }) => {
+        if (s.srcIndex < 0) return;
+        const img = getSnsImage(s.name);
+        if (!img) return;
+        const off = imageOffsets[s.srcIndex] || { dx: 0, dy: 0 };
+        const x = pcx + Math.cos(mid) * R * 0.58 + off.dx;
+        const y = pcy + Math.sin(mid) * R * 0.58 + off.dy;
+        try { ctx.drawImage(img, x - imgW / 2, y - imgH / 2, imgW, imgH); } catch (e) { return; }
+        if (adjustMode) {
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+          ctx.setLineDash([8, 6]);
+          ctx.strokeRect(x - imgW / 2, y - imgH / 2, imgW, imgH);
+          ctx.setLineDash([]);
         }
-        if (frac >= 0.04) {
-          const x = pcx + Math.cos(mid) * R * 0.88;
-          const y = pcy + Math.sin(mid) * R * 0.88;
-          ctx.font = `bold 32px ${FONT}`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.lineWidth = 6;
-          ctx.strokeStyle = 'rgba(16,22,43,0.85)';
-          ctx.strokeText(`${s.percent}%`, x, y);
-          ctx.fillStyle = '#ffffff';
-          ctx.fillText(`${s.percent}%`, x, y);
-          ctx.textBaseline = 'alphabetic';
-        }
+        hitBoxes.push({ srcIndex: s.srcIndex, x: x - imgW / 2, y: y - imgH / 2, w: imgW, h: imgH });
       });
       ctx.textAlign = 'left';
     }
 
+    function scheduleRender() {
+      if (rafPending) return;
+      rafPending = true;
+      requestAnimationFrame(() => { rafPending = false; renderSnsCanvas(); });
+    }
+
+    /* ========== プレビューを直接ドラッグして画像位置を調整 ========== */
+
+    function setupDrag() {
+      const cv = document.getElementById('snsCanvas');
+
+      function pos(e) {
+        const rect = cv.getBoundingClientRect();
+        return {
+          x: (e.clientX - rect.left) * (cv.width / rect.width),
+          y: (e.clientY - rect.top) * (cv.height / rect.height)
+        };
+      }
+
+      cv.addEventListener('pointerdown', (e) => {
+        if (!adjustMode) return;
+        const p = pos(e);
+        // 手前（後に描いたもの）から判定。少し余白を持たせる
+        const m = 12;
+        for (let i = hitBoxes.length - 1; i >= 0; i--) {
+          const b = hitBoxes[i];
+          if (p.x >= b.x - m && p.x <= b.x + b.w + m && p.y >= b.y - m && p.y <= b.y + b.h + m) {
+            const off = imageOffsets[b.srcIndex];
+            dragging = { index: b.srcIndex, startX: p.x, startY: p.y, startDx: off.dx, startDy: off.dy };
+            cv.setPointerCapture(e.pointerId);
+            cv.classList.add('dragging');
+            e.preventDefault();
+            return;
+          }
+        }
+      });
+
+      cv.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        const p = pos(e);
+        imageOffsets[dragging.index].dx = dragging.startDx + (p.x - dragging.startX);
+        imageOffsets[dragging.index].dy = dragging.startDy + (p.y - dragging.startY);
+        scheduleRender();
+        e.preventDefault();
+      });
+
+      const end = () => {
+        dragging = null;
+        cv.classList.remove('dragging');
+      };
+      cv.addEventListener('pointerup', end);
+      cv.addEventListener('pointercancel', end);
+    }
+
     function downloadSNSImage() {
       if (!sortedData.length) return alert('先にCSVを集計してください');
+      // 調整用の枠線が写り込まないよう、一時的にOFF相当で描き直して書き出す
+      const prev = adjustMode;
+      adjustMode = false;
       renderSnsCanvas();
-      const cv = document.getElementById('snsCanvas');
       try {
         const a = document.createElement('a');
-        a.href = cv.toDataURL('image/png');
+        a.href = document.getElementById('snsCanvas').toDataURL('image/png');
         a.download = 'deck_usage_sns.png';
         a.click();
       } catch (e) {
         alert('画像の書き出しに失敗しました');
       }
+      adjustMode = prev;
+      renderSnsCanvas();
     }
 
-    // ページ読み込み時に自動でマッピングを読み込む
     window.addEventListener('load', () => {
+      setupDrag();
       loadRideLines();
       renderSnsCanvas();
     });
