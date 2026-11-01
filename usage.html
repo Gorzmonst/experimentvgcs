@@ -44,6 +44,7 @@
   <p id="adjustHint">調整モード中：円グラフ上のカード画像をドラッグ（スマホはタップしたまま移動）して位置を調整できます</p>
 
   <canvas id="snsCanvas" width="1920" height="1080"></canvas>
+  <p id="imgStatus" style="font-size:0.9em;color:#555;"></p>
   <p><button onclick="downloadSNSImage()">SNS用画像をダウンロード（1920×1080）</button></p>
 
   <script>
@@ -174,22 +175,39 @@
 
     /* ========== SNS用画像（1920×1080）========== */
 
-    // カード画像（書き出しできるようCORS付きで読み込む。失敗した場合は描画しない）
+    // カード画像の読み込み。まずCORS付き（書き出し可能）で試し、失敗したらCORS無しで表示だけ行う
+    let exportMode = false;      // trueの間は「書き出し不可の画像」を描かない
+    let deckImgState = {};       // デッキ名 -> 状態（画面下の診断表示用）
+
     function getSnsImage(deckName) {
       const info = getRideInfo(deckName);
-      if (!info || !info.画像URL) return null;
+      if (!info) { deckImgState[deckName] = '未登録'; return null; }
+      if (!info.画像URL) { deckImgState[deckName] = '番号未設定'; return null; }
       const url = info.画像URL;
-      if (!snsImgCache[url]) {
-        const img = new Image();
-        const entry = { img, ok: false };
-        img.crossOrigin = 'anonymous';
-        img.onload = () => { entry.ok = img.naturalWidth > 0; renderSnsCanvas(); };
-        img.onerror = () => { entry.ok = false; };
-        img.src = url;
-        snsImgCache[url] = entry;
+      let e = snsImgCache[url];
+      if (!e) {
+        e = { img: null, ok: false, tainted: false, failed: false };
+        snsImgCache[url] = e;
+        const tryLoad = (cors) => {
+          const img = new Image();
+          if (cors) img.crossOrigin = 'anonymous';
+          img.onload = () => {
+            if (img.naturalWidth > 0) { e.img = img; e.ok = true; e.tainted = !cors; renderSnsCanvas(); }
+          };
+          img.onerror = () => {
+            if (cors) tryLoad(false); else { e.failed = true; renderSnsCanvas(); }
+          };
+          img.src = url;
+        };
+        tryLoad(true);
       }
-      const e = snsImgCache[url];
-      return e.ok ? e.img : null;
+      if (e.ok) {
+        if (e.tainted && exportMode) { deckImgState[deckName] = '書き出し不可'; return null; }
+        deckImgState[deckName] = e.tainted ? '表示のみ（書き出し不可）' : 'OK';
+        return e.img;
+      }
+      deckImgState[deckName] = e.failed ? '読み込み失敗' : '読み込み中';
+      return null;
     }
 
     function fitText(ctx, text, maxW) {
@@ -197,6 +215,71 @@
       let t = text;
       while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
       return t + '…';
+    }
+
+    /* ----- カード画像を、自分の項目（扇形）からはみ出さないように置くための計算 ----- */
+    const TWO_PI = Math.PI * 2;
+    const PAD = 8; // 扇形の縁からあける余白(px)
+
+    function pointInSector(px, py, g) {
+      const dx = px - g.cx, dy = py - g.cy;
+      const r = Math.hypot(dx, dy);
+      if (r > g.R - PAD) return false;
+      const span = g.a1 - g.a0;
+      if (span >= TWO_PI - 1e-6) return true; // 項目が1つだけ（円全体）
+      let rel = Math.atan2(dy, dx) - g.a0;
+      while (rel < 0) rel += TWO_PI;
+      while (rel >= TWO_PI) rel -= TWO_PI;
+      if (rel > span) return false;
+      const rel1 = span - rel;
+      const d0 = rel < Math.PI / 2 ? r * Math.sin(rel) : r;
+      const d1 = rel1 < Math.PI / 2 ? r * Math.sin(rel1) : r;
+      return d0 >= PAD && d1 >= PAD;
+    }
+
+    // 画像（中心x,y・幅w・高さh）が扇形に完全に収まるか（外周と中心を細かく調べる）
+    function rectFits(x, y, w, h, g) {
+      if (!pointInSector(x, y, g)) return false;
+      const N = 8, hw = w / 2, hh = h / 2;
+      for (let i = 0; i <= N; i++) {
+        const t = i / N;
+        const px = x - hw + w * t, py = y - hh + h * t;
+        if (!pointInSector(px, y - hh, g) || !pointInSector(px, y + hh, g)) return false;
+        if (!pointInSector(x - hw, py, g) || !pointInSector(x + hw, py, g)) return false;
+      }
+      return true;
+    }
+
+    // 初期位置とサイズ：収まる中で一番大きく、扇形の中ほどに置く（狭い項目では画像を小さくする）
+    function placeImage(g, mid) {
+      const baseW = g.R * 0.2;
+      const rs = [];
+      for (let f = 0.2; f <= 0.9; f += 0.02) rs.push(f);
+      rs.sort((a, b) => Math.abs(a - 0.58) - Math.abs(b - 0.58));
+      for (let sc = 1; sc >= 0.3; sc -= 0.05) {
+        const w = baseW * sc, h = w * 1.4;
+        for (const f of rs) {
+          const x = g.cx + Math.cos(mid) * g.R * f;
+          const y = g.cy + Math.sin(mid) * g.R * f;
+          if (rectFits(x, y, w, h, g)) return { x, y, w, h };
+        }
+      }
+      return null; // 小さくしても収まらない場合は画像を出さない
+    }
+
+    // prevから希望位置wantへ動かす。はみ出すなら縁に沿って動き、動けなければ手前で止める
+    function clampMove(prev, want, w, h, g) {
+      if (rectFits(want.x, want.y, w, h, g)) return want;
+      const ax = { x: want.x, y: prev.y };
+      if (rectFits(ax.x, ax.y, w, h, g)) return ax;
+      const ay = { x: prev.x, y: want.y };
+      if (rectFits(ay.x, ay.y, w, h, g)) return ay;
+      let lo = 0, hi = 1;
+      for (let i = 0; i < 16; i++) {
+        const m = (lo + hi) / 2;
+        if (rectFits(prev.x + (want.x - prev.x) * m, prev.y + (want.y - prev.y) * m, w, h, g)) lo = m; else hi = m;
+      }
+      return { x: prev.x + (want.x - prev.x) * lo, y: prev.y + (want.y - prev.y) * lo };
     }
 
     function renderSnsCanvas() {
@@ -303,11 +386,37 @@
         ctx.lineWidth = 4;
         ctx.strokeStyle = '#10162b';
         ctx.stroke();
-        mids.push({ s, mid: start + ang / 2, frac: s.count / totalCount });
+        mids.push({ s, mid: start + ang / 2, frac: s.count / totalCount,
+                    g: { cx: pcx, cy: pcy, R, a0: start, a1: start + ang } });
         start += ang;
       });
 
-      // 割合ラベル → カード画像の順に描く（画像を手前にして、ドラッグしやすくする）
+      // カード画像（自分の項目の中に収まるように配置）
+      mids.forEach(({ s, mid, g }) => {
+        if (s.srcIndex < 0) return;
+        const img = getSnsImage(s.name);
+        if (!img) return;
+        const pl = placeImage(g, mid);
+        if (!pl) return;
+        const off = imageOffsets[s.srcIndex] || (imageOffsets[s.srcIndex] = { dx: 0, dy: 0 });
+        let c = { x: pl.x + off.dx, y: pl.y + off.dy };
+        if (!rectFits(c.x, c.y, pl.w, pl.h, g)) {
+          c = clampMove({ x: pl.x, y: pl.y }, c, pl.w, pl.h, g); // 項目の外に出ていたら内側へ戻す
+          off.dx = c.x - pl.x; off.dy = c.y - pl.y;
+        }
+        try { ctx.drawImage(img, c.x - pl.w / 2, c.y - pl.h / 2, pl.w, pl.h); } catch (e) { return; }
+        if (adjustMode) {
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+          ctx.setLineDash([8, 6]);
+          ctx.strokeRect(c.x - pl.w / 2, c.y - pl.h / 2, pl.w, pl.h);
+          ctx.setLineDash([]);
+        }
+        hitBoxes.push({ srcIndex: s.srcIndex, x: c.x - pl.w / 2, y: c.y - pl.h / 2, w: pl.w, h: pl.h,
+                        cx: c.x, cy: c.y, defX: pl.x, defY: pl.y, g });
+      });
+
+      // 割合ラベル（画像より手前に描いて読めるようにする）
       mids.forEach(({ s, mid, frac }) => {
         if (frac < 0.04) return;
         const x = pcx + Math.cos(mid) * R * 0.88;
@@ -322,26 +431,20 @@
         ctx.fillText(`${s.percent}%`, x, y);
         ctx.textBaseline = 'alphabetic';
       });
-
-      const imgW = R * 0.2, imgH = imgW * 1.4;
-      mids.forEach(({ s, mid }) => {
-        if (s.srcIndex < 0) return;
-        const img = getSnsImage(s.name);
-        if (!img) return;
-        const off = imageOffsets[s.srcIndex] || { dx: 0, dy: 0 };
-        const x = pcx + Math.cos(mid) * R * 0.58 + off.dx;
-        const y = pcy + Math.sin(mid) * R * 0.58 + off.dy;
-        try { ctx.drawImage(img, x - imgW / 2, y - imgH / 2, imgW, imgH); } catch (e) { return; }
-        if (adjustMode) {
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-          ctx.setLineDash([8, 6]);
-          ctx.strokeRect(x - imgW / 2, y - imgH / 2, imgW, imgH);
-          ctx.setLineDash([]);
-        }
-        hitBoxes.push({ srcIndex: s.srcIndex, x: x - imgW / 2, y: y - imgH / 2, w: imgW, h: imgH });
-      });
       ctx.textAlign = 'left';
+      updateImgStatus(top);
+    }
+
+    // 画像が出ていないデッキを画面の下に表示（原因の切り分け用）
+    function updateImgStatus(top) {
+      const el = document.getElementById('imgStatus');
+      if (!el) return;
+      const bad = top
+        .map(d => [d.name, deckImgState[d.name]])
+        .filter(([, st]) => st && st !== 'OK');
+      el.textContent = bad.length
+        ? '画像の状態：' + bad.map(([n, st]) => `${n}（${st}）`).join('、')
+        : '画像の状態：すべて表示OK';
     }
 
     function scheduleRender() {
@@ -371,8 +474,7 @@
         for (let i = hitBoxes.length - 1; i >= 0; i--) {
           const b = hitBoxes[i];
           if (p.x >= b.x - m && p.x <= b.x + b.w + m && p.y >= b.y - m && p.y <= b.y + b.h + m) {
-            const off = imageOffsets[b.srcIndex];
-            dragging = { index: b.srcIndex, startX: p.x, startY: p.y, startDx: off.dx, startDy: off.dy };
+            dragging = { box: b, startX: p.x, startY: p.y, startCx: b.cx, startCy: b.cy, cur: { x: b.cx, y: b.cy } };
             cv.setPointerCapture(e.pointerId);
             cv.classList.add('dragging');
             e.preventDefault();
@@ -384,8 +486,12 @@
       cv.addEventListener('pointermove', (e) => {
         if (!dragging) return;
         const p = pos(e);
-        imageOffsets[dragging.index].dx = dragging.startDx + (p.x - dragging.startX);
-        imageOffsets[dragging.index].dy = dragging.startDy + (p.y - dragging.startY);
+        const b = dragging.box;
+        const want = { x: dragging.startCx + (p.x - dragging.startX), y: dragging.startCy + (p.y - dragging.startY) };
+        // 自分の項目の外には出ないように制限
+        dragging.cur = clampMove(dragging.cur, want, b.w, b.h, b.g);
+        imageOffsets[b.srcIndex].dx = dragging.cur.x - b.defX;
+        imageOffsets[b.srcIndex].dy = dragging.cur.y - b.defY;
         scheduleRender();
         e.preventDefault();
       });
@@ -403,17 +509,31 @@
       // 調整用の枠線が写り込まないよう、一時的にOFF相当で描き直して書き出す
       const prev = adjustMode;
       adjustMode = false;
-      renderSnsCanvas();
-      try {
+      const cv = document.getElementById('snsCanvas');
+      const save = (url) => {
         const a = document.createElement('a');
-        a.href = document.getElementById('snsCanvas').toDataURL('image/png');
+        a.href = url;
         a.download = 'deck_usage_sns.png';
         a.click();
+      };
+      try {
+        renderSnsCanvas();
+        try {
+          save(cv.toDataURL('image/png'));
+        } catch (e) {
+          // 公式サイトの画像がCORS非対応だと、そのままでは書き出せない → 画像なしで書き出す
+          exportMode = true;
+          renderSnsCanvas();
+          save(cv.toDataURL('image/png'));
+          alert('公式サイトの画像は書き出しが許可されていないため、カード画像なしで保存しました。\n画像入りにするには、画像を自分のサイトに置く必要があります。');
+        }
       } catch (e) {
         alert('画像の書き出しに失敗しました');
+      } finally {
+        exportMode = false;
+        adjustMode = prev;
+        renderSnsCanvas();
       }
-      adjustMode = prev;
-      renderSnsCanvas();
     }
 
     window.addEventListener('load', () => {
