@@ -49,6 +49,12 @@
   </p>
 
   <p>
+    カード画像：<input type="file" id="cardFiles" accept="image/*" multiple onchange="loadLocalCards(this.files)">
+    <span id="cardFilesInfo"></span><br>
+    <span style="font-size:0.85em;color:#666;">公式のカード画像を保存したファイル（例: dzbt01_001.png）をまとめて選択してください。ファイル名でカード番号と対応させます。画像はこのブラウザの中だけで使われ、サイトには置かれません。ページを開き直したら、もう一度選択が必要です。</span>
+  </p>
+
+  <p>
     <button id="adjustModeBtn" onclick="toggleAdjustMode()">画像調整モード: OFF</button>
     <button onclick="resetAll()">全画像の位置・拡大率をリセット</button>
   </p>
@@ -63,11 +69,14 @@
   <canvas id="snsCanvas" width="1920" height="1080"></canvas>
   <p id="imgStatus" style="font-size:0.9em;color:#555;"></p>
   <div id="verInfo"></div>
+  <p id="credit" style="display:none;font-size:0.85em;color:#555;">
+    当サイトに利用しているカード画像等は、カードファイト!! ヴァンガード公式ポータルサイト(http://cf-vanguard.com/) より、ガイドラインに従って転載しております。該当画像の再利用（転載・配布等）は禁止しております。<br>©Bushiroad
+  </p>
   <p><button onclick="downloadSNSImage()">SNS用画像をダウンロード（1920×1080）</button></p>
 
   <script>
     // 画面右下に出る更新情報。コードを直したら APP_VERSION も書き換える
-    const APP_VERSION = '2026.11.01-8';
+    const APP_VERSION = '2026.11.01-10';
 
     function fmtJst(d) {
       if (!d || isNaN(d)) return '不明';
@@ -113,7 +122,8 @@
         .replace(/\s+/g, '');
     }
 
-    function getCardImageUrl(cardNo) {
+    // カード番号 "DZ-BT01/001" → { url: 公式画像のURL, key: "dzbt01_001"（画像ファイル名の基になる） }
+    function parseCardNo(cardNo) {
       if (!cardNo) return null;
       const parts = cardNo.split('/');
       if (parts.length < 2) return null;
@@ -122,7 +132,15 @@
       if (!set || !num) return null;
       if (/^\d+$/.test(num)) num = num.padStart(3, '0');
       const setLower = set.toLowerCase().replace(/-/g, '');
-      return `https://cf-vanguard.com/wordpress/wp-content/images/cardlist/${set}/${setLower}_${num}.png`;
+      return {
+        url: `https://cf-vanguard.com/wordpress/wp-content/images/cardlist/${set}/${setLower}_${num}.png`,
+        key: `${setLower}_${num}`.toLowerCase()
+      };
+    }
+
+    function getCardImageUrl(cardNo) {
+      const c = parseCardNo(cardNo);
+      return c ? c.url : null;
     }
 
     function loadRideLines() {
@@ -157,8 +175,8 @@
         const full = (row['正式名称'] || '').trim();
         const cardNo = (row['カード番号'] || '').trim();
         if (!abbr && !full) return;
-        const img = getCardImageUrl(cardNo); // 番号が空なら null
-        const entry = { 正式名称: full, カード番号: cardNo, 画像URL: img };
+        const c = parseCardNo(cardNo); // 番号が空なら null
+        const entry = { 正式名称: full, カード番号: cardNo, 画像URL: c ? c.url : null, 画像キー: c ? c.key : null };
         if (abbr) rideMap[normKey(abbr)] = entry;
         if (full) rideMap[normKey(full)] = entry;
       });
@@ -262,13 +280,37 @@
 
     /* ========== SNS用画像（1920×1080）========== */
 
-    // カード画像の読み込み。書き出しできる画像（CORS許可）だけを表示する
+    // ---- 端末から選んだカード画像（サイトには置かず、このブラウザの中だけで使う）----
+    const localCards = {};   // key("dzbt01_001") -> { img, ok }
+
+    function loadLocalCards(files) {
+      let count = 0;
+      Array.from(files || []).forEach(f => {
+        // ファイル名の「dzbt01_001」の部分をキーにする（"dzbt01_001 (1).png" なども可）
+        const m = f.name.toLowerCase().match(/([a-z0-9]+)_([a-z0-9]+)/);
+        if (!m) return;
+        const key = `${m[1]}_${m[2]}`;
+        const img = new Image();
+        const entry = { img, ok: false };
+        img.onload = () => { entry.ok = img.naturalWidth > 0; renderSnsCanvas(); };
+        img.src = URL.createObjectURL(f);
+        localCards[key] = entry;
+        count++;
+      });
+      document.getElementById('cardFilesInfo').textContent = `${count}枚を読み込みました`;
+    }
+
+    // カード画像の取得。端末から選んだ画像を優先し、無ければ公式サイトの画像を使う
     let deckImgState = {};       // デッキ名 -> 状態（画面下の診断表示用）
 
     function getSnsImage(deckName) {
       const info = getRideInfo(deckName);
       if (!info) { deckImgState[deckName] = '未登録'; return null; }
       if (!info.画像URL) { deckImgState[deckName] = '番号未設定'; return null; }
+
+      const loc = info.画像キー && localCards[info.画像キー];
+      if (loc && loc.ok) { deckImgState[deckName] = 'OK'; return loc.img; }
+
       const url = info.画像URL;
       let e = snsImgCache[url];
       if (!e) {
@@ -283,7 +325,9 @@
         img.src = url;
       }
       if (e.ok) { deckImgState[deckName] = 'OK'; return e.img; }
-      deckImgState[deckName] = e.failed ? '読み込み失敗（URLの誤り、または公式側が許可していない）' : '読み込み中';
+      deckImgState[deckName] = e.failed
+        ? `画像なし（${info.画像キー}.png を「カード画像」から選択）`
+        : '読み込み中';
       return null;
     }
 
@@ -484,12 +528,13 @@
     function updateImgStatus(top) {
       const el = document.getElementById('imgStatus');
       if (!el) return;
-      const bad = top
-        .map(d => [d.name, deckImgState[d.name]])
-        .filter(([, st]) => st && st !== 'OK');
+      const states = top.map(d => [d.name, deckImgState[d.name]]);
+      const bad = states.filter(([, st]) => st && st !== 'OK');
       el.textContent = bad.length
         ? '画像の状態：' + bad.map(([n, st]) => `${n}（${st}）`).join('、')
         : '画像の状態：すべて表示OK';
+      const credit = document.getElementById('credit');
+      if (credit) credit.style.display = states.some(([, st]) => st === 'OK') ? 'block' : 'none';
     }
 
     function scheduleRender() {
