@@ -21,6 +21,13 @@
       border: 1px solid #ddd; border-radius: 6px; background: #fafafa;
     }
     #adjustPanel input[type=range] { width: 220px; vertical-align: middle; }
+    #splitPanel {
+      display: none; margin: 12px 0; padding: 12px 16px;
+      border: 1px solid #c9d0e8; border-radius: 8px; background: #f4f6fb;
+    }
+    #splitPanel table { width: 100%; border-collapse: collapse; }
+    #splitPanel td { padding: 6px 4px; }
+    #splitPanel input[type=number] { width: 70px; padding: 4px; }
     #snsCanvas { width: 100%; height: auto; display: block; border: 1px solid #ccc; background: #10162b; }
     #snsCanvas.adjusting { cursor: grab; touch-action: none; }
     #snsCanvas.dragging { cursor: grabbing; }
@@ -42,6 +49,11 @@
     <button onclick="processCSV()">集計</button>
   </p>
   <p id="rideStatus">ライドラインマッピング読み込み中...</p>
+
+  <div id="splitPanel">
+    <strong>同名カードの振り分け</strong>（合計人数と一致するように入力してください）
+    <table id="splitTable"></table>
+  </div>
 
   <p>
     大会名（任意）：<input type="text" id="eventName" style="width:260px" oninput="renderSnsCanvas()">
@@ -65,8 +77,17 @@
   <div id="verInfo"></div>
 
   <script>
-    // 画面右下に出る更新情報。コードを直したら APP_VERSION も書き換える
-    const APP_VERSION = '2026.11.01-6';
+    const APP_VERSION = '2026.11.09-2';
+
+    // ===== 同名カード定義 =====
+    const AMBIGUOUS_DECKS = {
+      '騎士王 アルフレッド': {
+        variants: [
+          { label: 'アイチアイコン', name: '騎士王 アルフレッド（アイチ）', cardNo: 'DZ-SS14/001' },
+          { label: '邂逅',           name: '騎士王 アルフレッド（邂逅）',   cardNo: 'DZ-SS11/012' }
+        ]
+      }
+    };
 
     function fmtJst(d) {
       if (!d || isNaN(d)) return '不明';
@@ -85,25 +106,24 @@
     }
 
     const FONT = '"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",Meiryo,sans-serif';
-
-    // 円グラフ（SNS画像の右側）の位置・大きさ
     const PIE = { cx: 1440, cy: 540, R: 420 };
-    // カード画像のうち「顔」に当たる位置（画像の幅・高さに対する割合）。ここが各項目の中心に来る
     const FACE = { x: 0.5, y: 0.35 };
     const ZOOM_MIN = 0.3, ZOOM_MAX = 5;
 
     let rideMap = {};
+    let rawCounts = {};
     let sortedData = [];
     let totalCount = 0;
-    let imageAdj = [];        // sortedDataと同じ並び。{dx, dy, zoom}（dx,dyはSNS画像上のピクセル）
+    let imageAdj = [];
     let adjustMode = false;
-    let selectedIdx = null;   // 調整中のデッキ（sortedDataの添字）
+    let selectedIdx = null;
     let dragging = null;
-    let sliceGeoms = [];      // 描画した各項目の扇形（クリック判定用）
+    let sliceGeoms = [];
     let rafPending = false;
-    const snsImgCache = {};   // url -> { img, ok, tainted, failed }
+    const snsImgCache = {};
+    let deckImgState = {};
+    let splitState = {};
 
-    // デッキ名の表記ゆれを吸収（全角半角・引用符・空白）
     function normKey(s) {
       return String(s || '')
         .normalize('NFKC')
@@ -152,18 +172,37 @@
     function buildRideMap(data) {
       rideMap = {};
       data.forEach(row => {
-        const abbr = (row['略称'] || '').trim();
         const full = (row['正式名称'] || '').trim();
         const cardNo = (row['カード番号'] || '').trim();
-        if (!abbr && !full) return;
-        const img = getCardImageUrl(cardNo); // 番号が空なら null
+        if (!full && !cardNo) return;
+
+        const img = getCardImageUrl(cardNo);
         const entry = { 正式名称: full, カード番号: cardNo, 画像URL: img };
-        if (abbr) rideMap[normKey(abbr)] = entry;
-        if (full) rideMap[normKey(full)] = entry;
+
+        // 正式名称を登録
+        if (full) {
+          rideMap[normKey(full)] = entry;
+        }
+
+        // 略称1〜略称4をすべて登録
+        for (let i = 1; i <= 4; i++) {
+          const abbr = (row[`略称${i}`] || '').trim();
+          if (abbr) {
+            rideMap[normKey(abbr)] = entry;
+          }
+        }
       });
     }
 
     function getRideInfo(deckName) {
+      // 振り分け後の名前の場合は特別対応
+      for (const [base, def] of Object.entries(AMBIGUOUS_DECKS)) {
+        for (const v of def.variants) {
+          if (deckName === v.name) {
+            return { 正式名称: v.name, カード番号: v.cardNo, 画像URL: getCardImageUrl(v.cardNo) };
+          }
+        }
+      }
       return rideMap[normKey(deckName)] || null;
     }
 
@@ -176,38 +215,117 @@
         header: true,
         skipEmptyLines: true,
         complete: (results) => {
-          const counts = {};
+          rawCounts = {};
           let total = 0;
           results.data.forEach(row => {
-            // トナメルCSVの「エントリーキャンセル」は集計から除外
             if ((row['ステータス'] || '').includes('キャンセル')) return;
             const deck = (row[columnName] || '').trim();
             if (deck) {
-              counts[deck] = (counts[deck] || 0) + 1;
+              rawCounts[deck] = (rawCounts[deck] || 0) + 1;
               total++;
             }
           });
           if (!total) return alert('データが見つかりません。カラム名を確認してください');
 
-          totalCount = total;
-          sortedData = Object.entries(counts)
-            .sort((a, b) => b[1] - a[1])
-            .map(([name, count]) => ({
-              name,
-              count,
-              percent: (count / total * 100).toFixed(1)
-            }));
+          // 振り分け状態を初期化
+          splitState = {};
+          for (const name of Object.keys(AMBIGUOUS_DECKS)) {
+            if (rawCounts[name]) {
+              const totalN = rawCounts[name];
+              splitState[name] = {};
+              AMBIGUOUS_DECKS[name].variants.forEach((v, i) => {
+                splitState[name][v.label] = i === 0 ? totalN : 0;
+              });
+            }
+          }
 
-          imageAdj = sortedData.map(() => ({ dx: 0, dy: 0, zoom: 1 }));
-          selectedIdx = null;
-          updateAdjustPanel();
+          buildFinalData();
+          renderSplitPanel();
           renderSnsCanvas();
         }
       });
     }
 
-    /* ========== 画像調整（位置・拡大率・リセット）========== */
+    function buildFinalData() {
+      const counts = { ...rawCounts };
 
+      for (const [base, def] of Object.entries(AMBIGUOUS_DECKS)) {
+        if (!counts[base]) continue;
+        delete counts[base];
+        def.variants.forEach(v => {
+          const n = splitState[base]?.[v.label] || 0;
+          if (n > 0) counts[v.name] = n;
+        });
+      }
+
+      totalCount = Object.values(counts).reduce((a, b) => a + b, 0);
+      sortedData = Object.entries(counts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => ({
+          name,
+          count,
+          percent: (count / totalCount * 100).toFixed(1)
+        }));
+
+      imageAdj = sortedData.map(() => ({ dx: 0, dy: 0, zoom: 1 }));
+      selectedIdx = null;
+      updateAdjustPanel();
+    }
+
+    function renderSplitPanel() {
+      const panel = document.getElementById('splitPanel');
+      const table = document.getElementById('splitTable');
+      const targets = Object.keys(AMBIGUOUS_DECKS).filter(n => rawCounts[n]);
+
+      if (!targets.length) {
+        panel.style.display = 'none';
+        return;
+      }
+      panel.style.display = 'block';
+
+      let html = '';
+      targets.forEach(base => {
+        const total = rawCounts[base];
+        const def = AMBIGUOUS_DECKS[base];
+        html += `<tr><td colspan="3"><strong>${base}</strong>（合計 ${total}人）</td></tr>`;
+        def.variants.forEach(v => {
+          const val = splitState[base][v.label] || 0;
+          html += `<tr>
+            <td>${v.label}</td>
+            <td><input type="number" min="0" max="${total}" value="${val}"
+              data-base="${base}" data-label="${v.label}"
+              oninput="onSplitInput(this)"></td>
+            <td>人</td>
+          </tr>`;
+        });
+      });
+      table.innerHTML = html;
+    }
+
+    function onSplitInput(input) {
+      const base = input.dataset.base;
+      const label = input.dataset.label;
+      const total = rawCounts[base];
+      let val = Math.max(0, Math.min(total, parseInt(input.value, 10) || 0));
+      input.value = val;
+
+      const def = AMBIGUOUS_DECKS[base];
+      const others = def.variants.filter(v => v.label !== label);
+      const remain = total - val;
+
+      if (others.length) {
+        others.forEach((v, i) => {
+          splitState[base][v.label] = i === 0 ? remain : 0;
+        });
+      }
+      splitState[base][label] = val;
+
+      renderSplitPanel();
+      buildFinalData();
+      renderSnsCanvas();
+    }
+
+    /* ========== 画像調整 ========== */
     function toggleAdjustMode() {
       adjustMode = !adjustMode;
       const btn = document.getElementById('adjustModeBtn');
@@ -259,10 +377,7 @@
       renderSnsCanvas();
     }
 
-    /* ========== SNS用画像（1920×1080）========== */
-
-    let deckImgState = {};       // デッキ名 -> 状態（画面下の診断表示用）
-
+    /* ========== 画像描画 ========== */
     function getSnsImage(deckName) {
       const info = getRideInfo(deckName);
       if (!info) { deckImgState[deckName] = '未登録'; return null; }
@@ -307,14 +422,12 @@
       ctx.closePath();
     }
 
-    // 項目の幅に応じた「拡大率100%」の画像の幅（狭い項目ほど顔がアップになる）
     function baseImageWidth(g) {
       const span = Math.min(g.a1 - g.a0, Math.PI);
       const chord = 2 * 0.6 * g.R * Math.sin(span / 2);
       return Math.max(g.R * 0.45, Math.min(g.R * 1.1, chord * 3.2));
     }
 
-    // 画像の「顔」の基準位置：項目の中ほど
     function anchorPoint(g) {
       const mid = (g.a0 + g.a1) / 2;
       return { x: g.cx + Math.cos(mid) * g.R * 0.6, y: g.cy + Math.sin(mid) * g.R * 0.6 };
@@ -327,7 +440,6 @@
       const W = 1920, H = 1080;
       sliceGeoms = [];
 
-      // 背景
       ctx.fillStyle = '#10162b';
       ctx.fillRect(0, 0, W, H);
       if (!sortedData.length) {
@@ -338,7 +450,6 @@
         return;
       }
 
-      // 表示するデッキ（上位n件＋その他）
       const n = Math.max(3, Math.min(12, parseInt(document.getElementById('snsTop').value, 10) || 10));
       const top = sortedData.slice(0, n);
       const rest = sortedData.slice(n);
@@ -355,7 +466,7 @@
       }
       slices.forEach(s => { s.percent = (s.count / totalCount * 100).toFixed(1); });
 
-      // ----- 左：タイトル＋箇条書き -----
+      // 左リスト
       const padX = 90;
       const eventName = document.getElementById('eventName').value.trim();
       ctx.textAlign = 'left';
@@ -377,24 +488,20 @@
 
       slices.forEach((s, i) => {
         const cy = listTop + rowH * i + rowH / 2;
-
-        // 色チップ（円グラフとの対応）
         ctx.fillStyle = s.color;
         ctx.beginPath();
         ctx.arc(padX + 14, cy, 14, 0, Math.PI * 2);
         ctx.fill();
 
-        // カード画像（無い場合はグレー枠）
         const tx = padX + 46, ty = cy - thumbH / 2;
         const img = s.srcIndex >= 0 ? getSnsImage(s.name) : null;
         if (img) {
-          try { ctx.drawImage(img, tx, ty, thumbW, thumbH); } catch (e) { /* skip */ }
+          try { ctx.drawImage(img, tx, ty, thumbW, thumbH); } catch (e) {}
         } else if (s.srcIndex >= 0) {
           ctx.fillStyle = '#2a3358';
           ctx.fillRect(tx, ty, thumbW, thumbH);
         }
 
-        // 名前と使用率
         const nameX = tx + thumbW + 18;
         ctx.textBaseline = 'middle';
         ctx.fillStyle = '#ffffff';
@@ -409,7 +516,7 @@
         ctx.textBaseline = 'alphabetic';
       });
 
-      // ----- 右：円グラフ -----
+      // 円グラフ
       const { cx: pcx, cy: pcy, R } = PIE;
       let start = -Math.PI / 2;
       const mids = [];
@@ -421,14 +528,12 @@
         start += ang;
       });
 
-      // 1) 塗りつぶし
       mids.forEach(({ s, g }) => {
         sectorPath(ctx, g);
         ctx.fillStyle = s.color;
         ctx.fill();
       });
 
-      // 2) カード画像（自分の項目の形でマスク：はみ出した部分は表示されない）
       mids.forEach(({ s, g }) => {
         if (s.srcIndex < 0) return;
         const img = getSnsImage(s.name);
@@ -437,15 +542,14 @@
         const w = baseImageWidth(g) * adj.zoom;
         const h = w * (img.naturalHeight / img.naturalWidth);
         const a = anchorPoint(g);
-        const fx = a.x + adj.dx, fy = a.y + adj.dy;   // 画像の「顔」の位置
+        const fx = a.x + adj.dx, fy = a.y + adj.dy;
         ctx.save();
         sectorPath(ctx, g);
         ctx.clip();
-        try { ctx.drawImage(img, fx - FACE.x * w, fy - FACE.y * h, w, h); } catch (e) { /* skip */ }
+        try { ctx.drawImage(img, fx - FACE.x * w, fy - FACE.y * h, w, h); } catch (e) {}
         ctx.restore();
       });
 
-      // 3) 項目の境目の線
       mids.forEach(({ g }) => {
         sectorPath(ctx, g);
         ctx.lineWidth = 4;
@@ -453,7 +557,6 @@
         ctx.stroke();
       });
 
-      // 4) 割合ラベル
       mids.forEach(({ s, mid, frac }) => {
         if (frac < 0.04) return;
         const x = pcx + Math.cos(mid) * R * 0.88;
@@ -469,7 +572,6 @@
         ctx.textBaseline = 'alphabetic';
       });
 
-      // 5) 調整モード：選択中の項目を点線で囲む
       if (adjustMode && selectedIdx !== null) {
         const m = mids.find(x => x.s.srcIndex === selectedIdx);
         if (m) {
@@ -485,7 +587,6 @@
       updateImgStatus(top);
     }
 
-    // 画像が出ていないデッキを画面の下に表示（原因の切り分け用）
     function updateImgStatus(top) {
       const el = document.getElementById('imgStatus');
       if (!el) return;
@@ -503,9 +604,6 @@
       requestAnimationFrame(() => { rafPending = false; renderSnsCanvas(); });
     }
 
-    /* ========== プレビューを直接操作（ドラッグで位置、ホイールで拡大縮小）========== */
-
-    // 点(x,y)が入っている項目（画像のあるもの）を返す
     function sliceAt(x, y) {
       for (const { srcIndex, g } of sliceGeoms) {
         if (srcIndex < 0) continue;
@@ -522,7 +620,6 @@
 
     function setupDrag() {
       const cv = document.getElementById('snsCanvas');
-
       function pos(e) {
         const rect = cv.getBoundingClientRect();
         return {
@@ -530,7 +627,6 @@
           y: (e.clientY - rect.top) * (cv.height / rect.height)
         };
       }
-
       cv.addEventListener('pointerdown', (e) => {
         if (!adjustMode) return;
         const p = pos(e);
@@ -545,7 +641,6 @@
         e.preventDefault();
         scheduleRender();
       });
-
       cv.addEventListener('pointermove', (e) => {
         if (!dragging) return;
         const p = pos(e);
@@ -555,15 +650,12 @@
         scheduleRender();
         e.preventDefault();
       });
-
       const end = () => {
         dragging = null;
         cv.classList.remove('dragging');
       };
       cv.addEventListener('pointerup', end);
       cv.addEventListener('pointercancel', end);
-
-      // PC：マウスホイールで拡大縮小（選択中の画像）
       cv.addEventListener('wheel', (e) => {
         if (!adjustMode || selectedIdx === null || !imageAdj[selectedIdx]) return;
         e.preventDefault();
