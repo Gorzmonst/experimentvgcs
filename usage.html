@@ -49,6 +49,7 @@
     <button onclick="processCSV()">集計</button>
   </p>
   <p id="rideStatus">ライドラインマッピング読み込み中...</p>
+  <p id="ambStatus">同名カード定義読み込み中...</p>
 
   <div id="splitPanel">
     <strong>同名カードの振り分け</strong>（合計人数と一致するように入力してください）
@@ -77,17 +78,9 @@
   <div id="verInfo"></div>
 
   <script>
-    const APP_VERSION = '2026.11.09-3';
+    const APP_VERSION = '2026.11.13-1';
 
-    // ===== 同名カード定義 =====
-    const AMBIGUOUS_DECKS = {
-      '騎士王 アルフレッド': {
-        variants: [
-          { label: 'アイチアイコン', name: '騎士王 アルフレッド（アイチ）', cardNo: 'DZ-SS14/001' },
-          { label: '邂逅',           name: '騎士王 アルフレッド（邂逅）',   cardNo: 'DZ-SS11/012' }
-        ]
-      }
-    };
+    let AMBIGUOUS_DECKS = {};   // CSVから構築
 
     function fmtJst(d) {
       if (!d || isNaN(d)) return '不明';
@@ -110,8 +103,8 @@
     const FACE = { x: 0.5, y: 0.35 };
     const ZOOM_MIN = 0.3, ZOOM_MAX = 5;
 
-    let rideMap = {};          // normKey -> entry
-    let rawCounts = {};        // 正式名称 or 元の名前 -> count（合算後）
+    let rideMap = {};
+    let rawCounts = {};
     let sortedData = [];
     let totalCount = 0;
     let imageAdj = [];
@@ -169,6 +162,45 @@
         });
     }
 
+    function loadAmbiguous() {
+      fetch('./ambiguous.csv')
+        .then(r => {
+          if (!r.ok) throw new Error();
+          return r.text();
+        })
+        .then(text => {
+          Papa.parse(text, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (res) => {
+              buildAmbiguous(res.data);
+              document.getElementById('ambStatus').textContent =
+                `同名カード定義読み込み完了（${Object.keys(AMBIGUOUS_DECKS).length}種類）`;
+            }
+          });
+        })
+        .catch(() => {
+          document.getElementById('ambStatus').textContent = 'ambiguous.csv が見つからないか読み込めませんでした';
+          AMBIGUOUS_DECKS = {};
+        });
+    }
+
+    function buildAmbiguous(data) {
+      AMBIGUOUS_DECKS = {};
+      data.forEach(row => {
+        const base = (row['正式名称'] || '').trim();
+        const label = (row['ラベル'] || '').trim();
+        const name = (row['表示名'] || '').trim();
+        const cardNo = (row['カード番号'] || '').trim();
+        if (!base || !label || !name || !cardNo) return;
+
+        if (!AMBIGUOUS_DECKS[base]) {
+          AMBIGUOUS_DECKS[base] = { variants: [] };
+        }
+        AMBIGUOUS_DECKS[base].variants.push({ label, name, cardNo });
+      });
+    }
+
     function buildRideMap(data) {
       rideMap = {};
       data.forEach(row => {
@@ -192,7 +224,6 @@
       });
     }
 
-    // デッキ名を正式名称に正規化（見つからなければそのまま）
     function canonicalize(deckName) {
       const info = rideMap[normKey(deckName)];
       return info && info.正式名称 ? info.正式名称 : deckName;
@@ -225,14 +256,12 @@
             const deck = (row[columnName] || '').trim();
             if (!deck) return;
 
-            // 略称・正式名称を正式名称に正規化して合算
             const key = canonicalize(deck);
             rawCounts[key] = (rawCounts[key] || 0) + 1;
             total++;
           });
           if (!total) return alert('データが見つかりません。カラム名を確認してください');
 
-          // 振り分け状態を初期化（正規化後の名前で判定）
           splitState = {};
           for (const name of Object.keys(AMBIGUOUS_DECKS)) {
             if (rawCounts[name]) {
@@ -471,7 +500,6 @@
       }
       slices.forEach(s => { s.percent = (s.count / totalCount * 100).toFixed(1); });
 
-      // 左リスト
       const padX = 90;
       const eventName = document.getElementById('eventName').value.trim();
       ctx.textAlign = 'left';
@@ -521,7 +549,6 @@
         ctx.textBaseline = 'alphabetic';
       });
 
-      // 円グラフ
       const { cx: pcx, cy: pcy, R } = PIE;
       let start = -Math.PI / 2;
       const mids = [];
@@ -674,6 +701,7 @@
       updateAdjustPanel();
       updateVerInfo();
       loadRideLines();
+      loadAmbiguous();
       renderSnsCanvas();
     });
   </script>
