@@ -638,13 +638,15 @@
         const info = s.srcIndex >= 0 ? getRideInfo(s.name) : null;
         const nation = (info?.国家 || '').trim().replace(/\s+/g, '');
         const dotColor = nationColorMap[nation] || s.color;
+
+        // 1. 点
         ctx.fillStyle = dotColor;
         ctx.beginPath();
         ctx.arc(padX + 14, cy, 14, 0, Math.PI * 2);
         ctx.fill();
 
-        const tx = padX + 46, ty = cy - thumbH / 2;
-        const statsRight = tx + thumbW * 0.5;
+        // 2. カード画像
+        const tx = padX + 40, ty = cy - thumbH / 2;
         const img = s.srcIndex >= 0 ? getSnsImage(s.name) : null;
         if (img) {
           try { ctx.drawImage(img, tx, ty, thumbW, thumbH); } catch (e) {}
@@ -653,17 +655,26 @@
           ctx.fillRect(tx, ty, thumbW, thumbH);
         }
 
-        const nameX = tx + thumbW + 18;
+        // 3. カード名
+        const nameX = tx + thumbW + 12;
         ctx.textBaseline = 'middle';
         ctx.fillStyle = listTextColor;
-        const stats = `${s.percent}%（${s.count}人）`;
-        ctx.textAlign = 'right';
-        ctx.font = `bold ${fontPx}px ${FONT}`;
-        const statsW = ctx.measureText(stats).width;
-        ctx.fillText(stats, statsRight, cy);
         ctx.textAlign = 'left';
         ctx.font = `${fontPx}px ${FONT}`;
         ctx.fillText(s.name, nameX, cy);
+
+        // 4. 使用率
+        const nameW = ctx.measureText(s.name).width;
+        const percentX = nameX + nameW + 16;
+        ctx.font = `bold ${fontPx}px ${FONT}`;
+        ctx.fillText(`${s.percent}%`, percentX, cy);
+
+        // 5. 人数
+        const percentW = ctx.measureText(`${s.percent}%`).width;
+        const countX = percentX + percentW + 12;
+        ctx.font = `${fontPx}px ${FONT}`;
+        ctx.fillText(`（${s.count}人）`, countX, cy);
+
         ctx.textBaseline = 'alphabetic';
       });
 
