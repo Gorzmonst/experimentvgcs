@@ -1,10 +1,10 @@
 項目,値,説明
 listX,50,箇条書きのX位置
-listY,235,箇条書きのY位置
+listY,2251,箇条書きのY位置
 listScale,100,箇条書きの拡大縮小(%)
-fontSize,28,箇条書きのフォントサイズ
-percentX,900,％の表示位置
-countX,1080,人数の表示位置
+fontSize,30,箇条書きのフォントサイズ
+percentX,845,％の表示位置
+countX,970,人数の表示位置
 textColor,#000000,箇条書きの文字色
 pieCx,1440,円グラフの中心X
 pieCy,580,円グラフの中心Y
