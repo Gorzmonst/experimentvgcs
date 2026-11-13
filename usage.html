@@ -78,9 +78,9 @@
   <div id="verInfo"></div>
 
   <script>
-    const APP_VERSION = '2026.11.13-1';
+    const APP_VERSION = '2026.11.13-2';
 
-    let AMBIGUOUS_DECKS = {};   // CSVから構築
+    let AMBIGUOUS_DECKS = {};
 
     function fmtJst(d) {
       if (!d || isNaN(d)) return '不明';
@@ -359,7 +359,6 @@
       renderSnsCanvas();
     }
 
-    /* ========== 画像調整 ========== */
     function toggleAdjustMode() {
       adjustMode = !adjustMode;
       const btn = document.getElementById('adjustModeBtn');
@@ -411,7 +410,6 @@
       renderSnsCanvas();
     }
 
-    /* ========== 画像描画 ========== */
     function getSnsImage(deckName) {
       const info = getRideInfo(deckName);
       if (!info) { deckImgState[deckName] = '未登録'; return null; }
@@ -589,10 +587,12 @@
         ctx.stroke();
       });
 
+      // 4) 割合ラベル（外側）
       mids.forEach(({ s, mid, frac }) => {
-        if (frac < 0.04) return;
-        const x = pcx + Math.cos(mid) * R * 0.88;
-        const y = pcy + Math.sin(mid) * R * 0.88;
+        if (frac < 0.035) return;
+        const dist = R * 1.22;
+        const x = pcx + Math.cos(mid) * dist;
+        const y = pcy + Math.sin(mid) * dist;
         ctx.font = `bold 32px ${FONT}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
