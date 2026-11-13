@@ -129,7 +129,7 @@
   <div id="verInfo"></div>
 
   <script>
-    const APP_VERSION = '2026.11.13-3';
+    const APP_VERSION = '2026.11.13-clean';
 
     let AMBIGUOUS_DECKS = {};
 
@@ -182,8 +182,10 @@
             complete: (res) => {
               nationColorMap = {};
               res.data.forEach(row => {
-                const nation = (row['国家'] || '').trim();
-                const color = (row['色'] || '').trim();
+                const nation = (row['国家'] || '').trim().replace(/\s+/g, '');
+                let color = (row['色'] || '').trim();
+                // 色コードの整形
+                if (color && !color.startsWith('#')) color = '#' + color;
                 if (nation && color) nationColorMap[nation] = color;
               });
               if (statusEl) statusEl.textContent = `国家色読み込み完了（${Object.keys(nationColorMap).length}件）`;
@@ -328,7 +330,14 @@
       for (const [base, def] of Object.entries(AMBIGUOUS_DECKS)) {
         for (const v of def.variants) {
           if (deckName === v.name) {
-            return { 正式名称: v.name, カード番号: v.cardNo, 国家: '', 画像URL: getCardImageUrl(v.cardNo) };
+            // ベースの正式名称から国家を引き継ぐ
+            const baseInfo = rideMap[normKey(base)] || {};
+            return {
+              正式名称: v.name,
+              カード番号: v.cardNo,
+              国家: baseInfo.国家 || '',
+              画像URL: getCardImageUrl(v.cardNo)
+            };
           }
         }
       }
@@ -609,9 +618,7 @@
 
       const padX = parseInt(document.getElementById('listX').value, 10) || 50;
       const eventName = document.getElementById('eventName').value.trim();
-      ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
-      // 全XX人の表示は削除
 
       const listTop = parseInt(document.getElementById('listTop').value, 10) || 235;
       const listScale = parseInt(document.getElementById('listScale').value, 10) || 100;
@@ -626,8 +633,8 @@
       slices.forEach((s, i) => {
         const cy = listTop + rowH * i + rowH / 2;
         const info = s.srcIndex >= 0 ? getRideInfo(s.name) : null;
-        const nation = (info?.国家 || '').trim();
-        const dotColor = nationColorMap[nation] || nationColorMap[nation.replace(/\s+/g, '')] || s.color;
+        const nation = (info?.国家 || '').trim().replace(/\s+/g, '');
+        const dotColor = nationColorMap[nation] || s.color;
         ctx.fillStyle = dotColor;
         ctx.beginPath();
         ctx.arc(padX + 14, cy, 14, 0, Math.PI * 2);
