@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>使用率分布</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <style>
     body {
@@ -39,6 +40,9 @@
     }
     #percentControls { margin: 8px 0; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; background: #f9f9f9; }
     #percentControls label { margin-right: 12px; }
+    #bottomTextControls { margin: 8px 0; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; background: #f9f9f9; }
+    #bottomTextControls input[type=text] { width: 420px; padding: 4px 6px; }
+    #bottomTextControls label { margin-right: 16px; }
   </style>
 </head>
 <body>
@@ -67,6 +71,14 @@
     <label><input type="checkbox" id="showPercent" checked onchange="renderSnsCanvas()"> ％表示</label>
     距離 <input type="range" id="percentDist" min="80" max="180" value="122" oninput="document.getElementById('percentDistVal').textContent=this.value; renderSnsCanvas()">
     <span id="percentDistVal">122</span>%
+  </div>
+
+  <div id="bottomTextControls">
+    下部テキスト：<input type="text" id="bottomText" placeholder="ここに入力した文字が黒帯に表示されます" oninput="renderSnsCanvas()">
+    <br>
+    <label><input type="radio" name="bottomAlign" value="left" checked onchange="renderSnsCanvas()"> 左揃え</label>
+    <label><input type="radio" name="bottomAlign" value="center" onchange="renderSnsCanvas()"> 中央揃え</label>
+    <label><input type="radio" name="bottomAlign" value="right" onchange="renderSnsCanvas()"> 右揃え</label>
   </div>
 
   <p>
@@ -637,6 +649,28 @@
           ctx.fillText(`${s.percent}%`, x, y);
           ctx.textBaseline = 'alphabetic';
         });
+      }
+
+      // 下部40px黒帯にテキスト描画
+      const bottomText = (document.getElementById('bottomText').value || '').trim();
+      if (bottomText) {
+        const align = document.querySelector('input[name="bottomAlign"]:checked')?.value || 'left';
+        ctx.save();
+        ctx.font = '28px "Noto Sans JP", "Noto Sans", sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.textBaseline = 'middle';
+        const y = H - 20;
+        if (align === 'left') {
+          ctx.textAlign = 'left';
+          ctx.fillText(bottomText, 40, y);
+        } else if (align === 'center') {
+          ctx.textAlign = 'center';
+          ctx.fillText(bottomText, W / 2, y);
+        } else {
+          ctx.textAlign = 'right';
+          ctx.fillText(bottomText, W - 40, y);
+        }
+        ctx.restore();
       }
 
       if (adjustMode && selectedIdx !== null) {
