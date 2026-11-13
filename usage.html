@@ -632,8 +632,10 @@
       const listScale = parseInt(document.getElementById('listScale').value, 10) || 100;
       const lineSpacing = parseInt(document.getElementById('lineSpacing').value, 10) || 100;
       const baseRowH = 70;
-      const rowH = baseRowH * (listScale / 100) * (lineSpacing / 100);
-      const thumbH = rowH - 12;
+      const contentH = baseRowH * (listScale / 100);
+      const spacing = contentH * ((lineSpacing / 100) - 1);
+      const rowH = contentH + spacing;
+      const thumbH = contentH - 12;
       const thumbW = thumbH * 0.716;
       const fontPx = parseInt(document.getElementById('listFontSize').value, 10) || 28;
 
