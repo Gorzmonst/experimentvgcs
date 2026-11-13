@@ -37,6 +37,8 @@
       background: rgba(255,255,255,0.85); padding: 2px 6px; border-radius: 4px;
       pointer-events: none;
     }
+    #percentControls { margin: 8px 0; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; background: #f9f9f9; }
+    #percentControls label { margin-right: 12px; }
   </style>
 </head>
 <body>
@@ -61,6 +63,12 @@
     リスト表示数：<input type="number" id="snsTop" value="10" min="3" max="12" style="width:60px" oninput="renderSnsCanvas()">
   </p>
 
+  <div id="percentControls">
+    <label><input type="checkbox" id="showPercent" checked onchange="renderSnsCanvas()"> ％表示</label>
+    距離 <input type="range" id="percentDist" min="80" max="180" value="122" oninput="document.getElementById('percentDistVal').textContent=this.value; renderSnsCanvas()">
+    <span id="percentDistVal">122</span>%
+  </div>
+
   <p>
     <button id="adjustModeBtn" onclick="toggleAdjustMode()">画像調整モード: OFF</button>
     <button onclick="resetAll()">全画像の位置・拡大率をリセット</button>
@@ -78,7 +86,7 @@
   <div id="verInfo"></div>
 
   <script>
-    const APP_VERSION = '2026.11.13-2';
+    const APP_VERSION = '2026.11.13-3';
 
     let AMBIGUOUS_DECKS = {};
 
@@ -117,6 +125,9 @@
     let deckImgState = {};
     let splitState = {};
 
+    let bgImage = null;
+    let bgLoaded = false;
+
     function normKey(s) {
       return String(s || '')
         .normalize('NFKC')
@@ -135,6 +146,20 @@
       if (/^\d+$/.test(num)) num = num.padStart(3, '0');
       const setLower = set.toLowerCase().replace(/-/g, '');
       return `https://cf-vanguard.com/wordpress/wp-content/images/cardlist/${set}/${setLower}_${num}.png`;
+    }
+
+    function loadBackground() {
+      const img = new Image();
+      img.onload = () => {
+        bgImage = img;
+        bgLoaded = true;
+        renderSnsCanvas();
+      };
+      img.onerror = () => {
+        console.warn('背景画像の読み込みに失敗しました');
+        bgLoaded = false;
+      };
+      img.src = './expvgcs_background.png';
     }
 
     function loadRideLines() {
@@ -472,8 +497,14 @@
       const W = 1920, H = 1080;
       sliceGeoms = [];
 
-      ctx.fillStyle = '#10162b';
-      ctx.fillRect(0, 0, W, H);
+      // 背景
+      if (bgLoaded && bgImage) {
+        ctx.drawImage(bgImage, 0, 0, W, H);
+      } else {
+        ctx.fillStyle = '#10162b';
+        ctx.fillRect(0, 0, W, H);
+      }
+
       if (!sortedData.length) {
         ctx.fillStyle = '#8a93b8';
         ctx.font = `bold 44px ${FONT}`;
@@ -587,22 +618,26 @@
         ctx.stroke();
       });
 
-      // 4) 割合ラベル（外側）
-      mids.forEach(({ s, mid, frac }) => {
-        if (frac < 0.035) return;
-        const dist = R * 1.22;
-        const x = pcx + Math.cos(mid) * dist;
-        const y = pcy + Math.sin(mid) * dist;
-        ctx.font = `bold 32px ${FONT}`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.lineWidth = 6;
-        ctx.strokeStyle = 'rgba(16,22,43,0.85)';
-        ctx.strokeText(`${s.percent}%`, x, y);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText(`${s.percent}%`, x, y);
-        ctx.textBaseline = 'alphabetic';
-      });
+      // 4) 割合ラベル（距離・表示ON/OFF対応）
+      const showPercent = document.getElementById('showPercent').checked;
+      const distRatio = parseInt(document.getElementById('percentDist').value, 10) / 100;
+      if (showPercent) {
+        mids.forEach(({ s, mid, frac }) => {
+          if (frac < 0.035) return;
+          const dist = R * distRatio;
+          const x = pcx + Math.cos(mid) * dist;
+          const y = pcy + Math.sin(mid) * dist;
+          ctx.font = `bold 32px ${FONT}`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.lineWidth = 6;
+          ctx.strokeStyle = 'rgba(16,22,43,0.85)';
+          ctx.strokeText(`${s.percent}%`, x, y);
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText(`${s.percent}%`, x, y);
+          ctx.textBaseline = 'alphabetic';
+        });
+      }
 
       if (adjustMode && selectedIdx !== null) {
         const m = mids.find(x => x.s.srcIndex === selectedIdx);
@@ -700,6 +735,7 @@
       setupDrag();
       updateAdjustPanel();
       updateVerInfo();
+      loadBackground();
       loadRideLines();
       loadAmbiguous();
       renderSnsCanvas();
