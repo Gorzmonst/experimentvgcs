@@ -121,6 +121,7 @@
   <p>
     <button id="adjustModeBtn" onclick="toggleAdjustMode()">円グラフ調整モード: OFF</button>
     <button onclick="resetAll()">全画像の位置・拡大率をリセット</button>
+    <button onclick="resetPercentPos()">％表示の位置をリセット</button>
   </p>
   <p id="adjustHint">調整モード中：円グラフの項目をタップして選択し、そのままドラッグで画像の位置を動かせます。拡大・縮小はスライダー（PCはマウスホイールも可）。項目の外にはみ出した部分は表示されません。</p>
   <div id="adjustPanel">
@@ -556,6 +557,11 @@
       if (selectedIdx === null || !imageAdj[selectedIdx]) return;
       imageAdj[selectedIdx] = { dx: 0, dy: 0, zoom: 1 };
       updateAdjustPanel();
+      renderSnsCanvas();
+    }
+
+    function resetPercentPos() {
+      percentAdj = percentAdj.map(() => ({ dx: 0, dy: 0 }));
       renderSnsCanvas();
     }
 
