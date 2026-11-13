@@ -110,6 +110,7 @@
     X <input type="number" id="listX" value="50" min="0" max="400" style="width:60px" oninput="renderSnsCanvas()">
     上端Y <input type="number" id="listTop" value="235" min="140" max="500" style="width:60px" oninput="renderSnsCanvas()">
     サイズ <input type="number" id="listScale" value="100" min="60" max="150" style="width:60px" oninput="renderSnsCanvas()">%
+    フォントサイズ <input type="number" id="listFontSize" value="28" min="12" max="48" style="width:60px" oninput="renderSnsCanvas()"> px
     文字色 <input type="text" id="listTextColor" value="#000000" style="width:90px" oninput="renderSnsCanvas()">
   </div>
 
@@ -630,8 +631,8 @@
       const rowH = baseRowH * (listScale / 100);
       const thumbH = rowH - 12;
       const thumbW = thumbH * 0.716;
-      const fontPx = Math.min(34, Math.floor(rowH * 0.46));
-      const statsRight = padX + 910;
+      const fontPx = parseInt(document.getElementById('listFontSize').value, 10) || 28;
+      const statsRight = padX + 1000;
 
       slices.forEach((s, i) => {
         const cy = listTop + rowH * i + rowH / 2;
@@ -662,7 +663,7 @@
         ctx.fillText(stats, statsRight, cy);
         ctx.textAlign = 'left';
         ctx.font = `${fontPx}px ${FONT}`;
-        ctx.fillText(fitText(ctx, s.name, statsRight - statsW - 24 - nameX), nameX, cy);
+        ctx.fillText(s.name, nameX, cy);
         ctx.textBaseline = 'alphabetic';
       });
 
