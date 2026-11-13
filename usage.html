@@ -61,6 +61,7 @@
   </p>
   <p id="rideStatus">ライドラインマッピング読み込み中...</p>
   <p id="ambStatus">同名カード定義読み込み中...</p>
+  <p id="nationStatus">国家色読み込み中...</p>
 
   <div id="splitPanel">
     <strong>同名カードの振り分け</strong>（合計人数と一致するように入力してください）
@@ -170,6 +171,8 @@
     let nationColorMap = {};
 
     function loadNationColors() {
+      const statusEl = document.getElementById('nationStatus');
+      if (statusEl) statusEl.textContent = '国家色読み込み中...';
       fetch('./nations.csv')
         .then(r => r.ok ? r.text() : Promise.reject())
         .then(text => {
@@ -183,6 +186,7 @@
                 const color = (row['色'] || '').trim();
                 if (nation && color) nationColorMap[nation] = color;
               });
+              if (statusEl) statusEl.textContent = `国家色読み込み完了（${Object.keys(nationColorMap).length}件）`;
               renderSnsCanvas();
             }
           });
@@ -197,6 +201,8 @@
             'ストイケイア': '#66bb6a',
             'ドラゴンエンパイア': '#ef5350'
           };
+          if (statusEl) statusEl.textContent = 'nations.csv 読み込み失敗 → デフォルト色を使用';
+          renderSnsCanvas();
         });
     }
 
@@ -628,8 +634,8 @@
       slices.forEach((s, i) => {
         const cy = listTop + rowH * i + rowH / 2;
         const info = s.srcIndex >= 0 ? getRideInfo(s.name) : null;
-        const nation = info?.国家 || '';
-        const dotColor = nationColorMap[nation] || s.color;
+        const nation = (info?.国家 || '').trim();
+        const dotColor = nationColorMap[nation] || nationColorMap[nation.replace(/\s+/g, '')] || s.color;
         ctx.fillStyle = dotColor;
         ctx.beginPath();
         ctx.arc(padX + 14, cy, 14, 0, Math.PI * 2);
