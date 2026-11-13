@@ -43,6 +43,10 @@
     #bottomTextControls { margin: 8px 0; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; background: #f9f9f9; }
     #bottomTextControls input[type=text] { width: 420px; padding: 4px 6px; }
     #bottomTextControls label { margin-right: 16px; }
+    #topTextControls { margin: 8px 0; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; background: #f9f9f9; }
+    #topTextControls input[type=text] { width: 420px; padding: 4px 6px; }
+    #topTextControls label { margin-right: 16px; }
+    #pieControls { margin: 8px 0; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; background: #f9f9f9; }
   </style>
 </head>
 <body>
@@ -79,6 +83,21 @@
     <label><input type="radio" name="bottomAlign" value="left" checked onchange="renderSnsCanvas()"> 左揃え</label>
     <label><input type="radio" name="bottomAlign" value="center" onchange="renderSnsCanvas()"> 中央揃え</label>
     <label><input type="radio" name="bottomAlign" value="right" onchange="renderSnsCanvas()"> 右揃え</label>
+  </div>
+
+  <div id="topTextControls">
+    上部テキスト：<input type="text" id="topText" placeholder="上部黒帯に表示する文字" oninput="renderSnsCanvas()">
+    <br>
+    <label><input type="radio" name="topAlign" value="left" checked onchange="renderSnsCanvas()"> 左揃え</label>
+    <label><input type="radio" name="topAlign" value="center" onchange="renderSnsCanvas()"> 中央揃え</label>
+    <label><input type="radio" name="topAlign" value="right" onchange="renderSnsCanvas()"> 右揃え</label>
+  </div>
+
+  <div id="pieControls">
+    円グラフ位置：
+    中心X <input type="number" id="pieCx" value="1440" min="200" max="1800" style="width:70px" oninput="renderSnsCanvas()">
+    中心Y <input type="number" id="pieCy" value="580" min="200" max="900" style="width:70px" oninput="renderSnsCanvas()">
+    半径 <input type="number" id="pieR" value="380" min="200" max="500" style="width:70px" oninput="renderSnsCanvas()">
   </div>
 
   <p>
@@ -119,7 +138,7 @@
     }
 
     const FONT = '"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",Meiryo,sans-serif';
-    const PIE = { cx: 1440, cy: 540, R: 420 };
+    // 円グラフ位置はUIから動的に取得
     const FACE = { x: 0.5, y: 0.35 };
     const ZOOM_MIN = 0.3, ZOOM_MAX = 5;
 
@@ -497,6 +516,14 @@
       return Math.max(g.R * 0.45, Math.min(g.R * 1.1, chord * 3.2));
     }
 
+    function getPiePos() {
+      return {
+        cx: parseInt(document.getElementById('pieCx').value, 10) || 1440,
+        cy: parseInt(document.getElementById('pieCy').value, 10) || 580,
+        R:  parseInt(document.getElementById('pieR').value, 10)  || 380
+      };
+    }
+
     function anchorPoint(g) {
       const mid = (g.a0 + g.a1) / 2;
       return { x: g.cx + Math.cos(mid) * g.R * 0.6, y: g.cy + Math.sin(mid) * g.R * 0.6 };
@@ -590,7 +617,7 @@
         ctx.textBaseline = 'alphabetic';
       });
 
-      const { cx: pcx, cy: pcy, R } = PIE;
+      const { cx: pcx, cy: pcy, R } = getPiePos();
       let start = -Math.PI / 2;
       const mids = [];
       slices.forEach(s => {
@@ -669,6 +696,28 @@
         } else {
           ctx.textAlign = 'right';
           ctx.fillText(bottomText, W - 40, y);
+        }
+        ctx.restore();
+      }
+
+      // 上部140px黒帯にテキスト描画
+      const topText = (document.getElementById('topText').value || '').trim();
+      if (topText) {
+        const align = document.querySelector('input[name="topAlign"]:checked')?.value || 'left';
+        ctx.save();
+        ctx.font = '36px "Noto Sans JP", "Noto Sans", sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.textBaseline = 'middle';
+        const y = 70;
+        if (align === 'left') {
+          ctx.textAlign = 'left';
+          ctx.fillText(topText, 40, y);
+        } else if (align === 'center') {
+          ctx.textAlign = 'center';
+          ctx.fillText(topText, W / 2, y);
+        } else {
+          ctx.textAlign = 'right';
+          ctx.fillText(topText, W - 40, y);
         }
         ctx.restore();
       }
