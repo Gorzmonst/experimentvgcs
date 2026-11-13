@@ -632,7 +632,6 @@
       const thumbH = rowH - 12;
       const thumbW = thumbH * 0.716;
       const fontPx = parseInt(document.getElementById('listFontSize').value, 10) || 28;
-      const statsRight = padX + 1000;
 
       slices.forEach((s, i) => {
         const cy = listTop + rowH * i + rowH / 2;
@@ -645,6 +644,7 @@
         ctx.fill();
 
         const tx = padX + 46, ty = cy - thumbH / 2;
+        const statsRight = tx + thumbW * 0.5;
         const img = s.srcIndex >= 0 ? getSnsImage(s.name) : null;
         if (img) {
           try { ctx.drawImage(img, tx, ty, thumbW, thumbH); } catch (e) {}
