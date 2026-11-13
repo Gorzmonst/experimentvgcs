@@ -205,6 +205,12 @@
               set('pieCx', 'pieCx');
               set('pieCy', 'pieCy');
               set('pieR', 'pieR');
+              set('percentDist', 'percentDist');
+              set('percentFontSize', 'percentFontSize');
+              set('bottomText', 'bottomText');
+              set('topText', 'topText');
+              set('topFontSize', 'topFontSize');
+              set('topY', 'topY');
               renderSnsCanvas();
             }
           });
@@ -450,6 +456,7 @@
 
       imageAdj = sortedData.map(() => ({ dx: 0, dy: 0, zoom: 1 }));
       percentAdj = sortedData.map(() => ({ dx: 0, dy: 0 }));
+      percentAdj.push({ dx: 0, dy: 0 }); // その他用
       selectedIdx = null;
       updateAdjustPanel();
     }
@@ -768,6 +775,9 @@
           if (s.srcIndex >= 0 && percentAdj[s.srcIndex]) {
             x += percentAdj[s.srcIndex].dx;
             y += percentAdj[s.srcIndex].dy;
+          } else if (s.srcIndex === -1 && percentAdj[percentAdj.length - 1]) {
+            x += percentAdj[percentAdj.length - 1].dx;
+            y += percentAdj[percentAdj.length - 1].dy;
           }
           ctx.font = `bold ${fontSize}px ${FONT}`;
           ctx.textAlign = 'center';
@@ -880,15 +890,16 @@
       ctx.font = `bold ${fontSize}px ${FONT}`;
       for (let i = sliceGeoms.length - 1; i >= 0; i--) {
         const { srcIndex, g } = sliceGeoms[i];
-        if (srcIndex < 0 || !percentAdj[srcIndex]) continue;
+        const adj = srcIndex >= 0 ? percentAdj[srcIndex] : percentAdj[percentAdj.length - 1];
+        if (!adj) continue;
         const mid = (g.a0 + g.a1) / 2;
         const dist = g.R * (parseInt(document.getElementById('percentDist').value, 10) / 100);
-        let px = g.cx + Math.cos(mid) * dist + percentAdj[srcIndex].dx;
-        let py = g.cy + Math.sin(mid) * dist + percentAdj[srcIndex].dy;
+        let px = g.cx + Math.cos(mid) * dist + adj.dx;
+        let py = g.cy + Math.sin(mid) * dist + adj.dy;
         const w = ctx.measureText('99.9%').width + 10;
         const h = fontSize + 6;
         if (x >= px - w/2 && x <= px + w/2 && y >= py - h/2 && y <= py + h/2) {
-          return srcIndex;
+          return srcIndex >= 0 ? srcIndex : 'other';
         }
       }
       return null;
@@ -910,7 +921,7 @@
         const pIdx = percentAt(p.x, p.y);
         if (pIdx !== null) {
           selectedIdx = pIdx;
-          const a = percentAdj[pIdx];
+          const a = pIdx === 'other' ? percentAdj[percentAdj.length - 1] : percentAdj[pIdx];
           dragging = { type: 'percent', index: pIdx, startX: p.x, startY: p.y, startDx: a.dx, startDy: a.dy };
           cv.setPointerCapture(e.pointerId);
           cv.classList.add('dragging');
@@ -934,7 +945,7 @@
         if (!dragging) return;
         const p = pos(e);
         if (dragging.type === 'percent') {
-          const a = percentAdj[dragging.index];
+          const a = dragging.index === 'other' ? percentAdj[percentAdj.length - 1] : percentAdj[dragging.index];
           a.dx = dragging.startDx + (p.x - dragging.startX);
           a.dy = dragging.startDy + (p.y - dragging.startY);
         } else {
