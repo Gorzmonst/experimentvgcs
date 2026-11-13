@@ -159,8 +159,38 @@
     let deckImgState = {};
     let splitState = {};
 
-    let bgImage = null;
-    let bgLoaded = false;
+    let nationColorMap = {};
+
+    function loadNationColors() {
+      fetch('./nations.csv')
+        .then(r => r.ok ? r.text() : Promise.reject())
+        .then(text => {
+          Papa.parse(text, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (res) => {
+              nationColorMap = {};
+              res.data.forEach(row => {
+                const nation = (row['国家'] || '').trim();
+                const color = (row['色'] || '').trim();
+                if (nation && color) nationColorMap[nation] = color;
+              });
+              renderSnsCanvas();
+            }
+          });
+        })
+        .catch(() => {
+          // デフォルト色
+          nationColorMap = {
+            'リリステ': '#ff6b9d',
+            'ダークステイツ': '#6b5b95',
+            'ブラントゲート': '#f9a825',
+            'ケテルサンクチュアリ': '#42a5f5',
+            'ストイケイア': '#66bb6a',
+            'ドラゴンエンパイア': '#ef5350'
+          };
+        });
+    }
 
     function normKey(s) {
       return String(s || '')
@@ -268,7 +298,7 @@
         if (!full && !cardNo) return;
 
         const img = getCardImageUrl(cardNo);
-        const entry = { 正式名称: full, カード番号: cardNo, 画像URL: img };
+        const entry = { 正式名称: full, カード番号: cardNo, 国家: (row['国家'] || '').trim(), 画像URL: img };
 
         if (full) {
           rideMap[normKey(full)] = entry;
@@ -292,7 +322,7 @@
       for (const [base, def] of Object.entries(AMBIGUOUS_DECKS)) {
         for (const v of def.variants) {
           if (deckName === v.name) {
-            return { 正式名称: v.name, カード番号: v.cardNo, 画像URL: getCardImageUrl(v.cardNo) };
+            return { 正式名称: v.name, カード番号: v.cardNo, 国家: '', 画像URL: getCardImageUrl(v.cardNo) };
           }
         }
       }
@@ -571,7 +601,7 @@
       }
       slices.forEach(s => { s.percent = (s.count / totalCount * 100).toFixed(1); });
 
-      const padX = 90;
+      const padX = 50;
       const eventName = document.getElementById('eventName').value.trim();
       ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
@@ -590,7 +620,10 @@
 
       slices.forEach((s, i) => {
         const cy = listTop + rowH * i + rowH / 2;
-        ctx.fillStyle = s.color;
+        const info = s.srcIndex >= 0 ? getRideInfo(s.name) : null;
+        const nation = info?.国家 || '';
+        const dotColor = nationColorMap[nation] || s.color;
+        ctx.fillStyle = dotColor;
         ctx.beginPath();
         ctx.arc(padX + 14, cy, 14, 0, Math.PI * 2);
         ctx.fill();
@@ -823,6 +856,7 @@
       loadBackground();
       loadRideLines();
       loadAmbiguous();
+      loadNationColors();
       renderSnsCanvas();
     });
   </script>
