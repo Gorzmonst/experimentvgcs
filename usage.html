@@ -211,6 +211,8 @@
         })
         .catch(() => {});
     }
+
+    function loadNationColors() {
       const statusEl = document.getElementById('nationStatus');
       if (statusEl) statusEl.textContent = '国家色読み込み中...';
       fetch('./nations.csv')
