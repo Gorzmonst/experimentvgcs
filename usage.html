@@ -86,11 +86,14 @@
   </div>
 
   <div id="topTextControls">
-    上部テキスト：<input type="text" id="topText" placeholder="上部黒帯に表示する文字" oninput="renderSnsCanvas()">
+    上部テキスト：<input type="text" id="topText" value="デッキ使用率分布" oninput="renderSnsCanvas()">
     <br>
     <label><input type="radio" name="topAlign" value="left" checked onchange="renderSnsCanvas()"> 左揃え</label>
     <label><input type="radio" name="topAlign" value="center" onchange="renderSnsCanvas()"> 中央揃え</label>
     <label><input type="radio" name="topAlign" value="right" onchange="renderSnsCanvas()"> 右揃え</label>
+    <br>
+    サイズ <input type="number" id="topFontSize" value="48" min="20" max="80" style="width:60px" oninput="renderSnsCanvas()"> px
+    高さ位置 <input type="number" id="topY" value="70" min="20" max="120" style="width:60px" oninput="renderSnsCanvas()"> （140px内）
   </div>
 
   <div id="pieControls">
@@ -572,9 +575,7 @@
       const eventName = document.getElementById('eventName').value.trim();
       ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
-      ctx.fillStyle = '#ffffff';
-      ctx.font = `bold 66px ${FONT}`;
-      ctx.fillText('デッキ使用率分布', padX, 130);
+      // デッキ使用率分布の固定表示は削除（上部テキストに移行）
       ctx.fillStyle = '#aab3d6';
       ctx.font = `34px ${FONT}`;
       ctx.fillText((eventName ? eventName + '　' : '') + `全${totalCount}人`, padX, 190);
@@ -704,11 +705,12 @@
       const topText = (document.getElementById('topText').value || '').trim();
       if (topText) {
         const align = document.querySelector('input[name="topAlign"]:checked')?.value || 'left';
+        const fontSize = parseInt(document.getElementById('topFontSize').value, 10) || 48;
+        const y = parseInt(document.getElementById('topY').value, 10) || 70;
         ctx.save();
-        ctx.font = '36px "Noto Sans JP", "Noto Sans", sans-serif';
+        ctx.font = `bold ${fontSize}px "Noto Sans JP", "Noto Sans", sans-serif`;
         ctx.fillStyle = '#ffffff';
         ctx.textBaseline = 'middle';
-        const y = 70;
         if (align === 'left') {
           ctx.textAlign = 'left';
           ctx.fillText(topText, 40, y);
