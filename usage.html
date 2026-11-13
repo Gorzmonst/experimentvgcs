@@ -77,6 +77,7 @@
     <label><input type="checkbox" id="showPercent" checked onchange="renderSnsCanvas()"> ％表示</label>
     距離 <input type="range" id="percentDist" min="80" max="180" value="122" oninput="document.getElementById('percentDistVal').textContent=this.value; renderSnsCanvas()">
     <span id="percentDistVal">122</span>%
+    サイズ <input type="number" id="percentFontSize" value="32" min="16" max="60" style="width:60px" oninput="renderSnsCanvas()"> px
   </div>
 
   <div id="bottomTextControls">
@@ -115,7 +116,7 @@
   </div>
 
   <p>
-    <button id="adjustModeBtn" onclick="toggleAdjustMode()">画像調整モード: OFF</button>
+    <button id="adjustModeBtn" onclick="toggleAdjustMode()">円グラフ調整モード: OFF</button>
     <button onclick="resetAll()">全画像の位置・拡大率をリセット</button>
   </p>
   <p id="adjustHint">調整モード中：円グラフの項目をタップして選択し、そのままドラッグで画像の位置を動かせます。拡大・縮小はスライダー（PCはマウスホイールも可）。項目の外にはみ出した部分は表示されません。</p>
@@ -469,7 +470,7 @@
     function toggleAdjustMode() {
       adjustMode = !adjustMode;
       const btn = document.getElementById('adjustModeBtn');
-      btn.textContent = `画像調整モード: ${adjustMode ? 'ON' : 'OFF'}`;
+      btn.textContent = `円グラフ調整モード: ${adjustMode ? 'ON' : 'OFF'}`;
       btn.classList.toggle('active', adjustMode);
       document.getElementById('adjustHint').style.display = adjustMode ? 'block' : 'none';
       document.getElementById('adjustPanel').style.display = adjustMode ? 'block' : 'none';
@@ -663,17 +664,19 @@
         ctx.font = `${fontPx}px ${FONT}`;
         ctx.fillText(s.name, nameX, cy);
 
-        // 4. 使用率
-        const nameW = ctx.measureText(s.name).width;
-        const percentX = nameX + nameW + 16;
+        // 4. 使用率（右揃え）
+        ctx.textAlign = 'right';
         ctx.font = `bold ${fontPx}px ${FONT}`;
-        ctx.fillText(`${s.percent}%`, percentX, cy);
+        const percentText = `${s.percent}%`;
+        const percentX = 900;
+        ctx.fillText(percentText, percentX, cy);
 
-        // 5. 人数
-        const percentW = ctx.measureText(`${s.percent}%`).width;
-        const countX = percentX + percentW + 12;
+        // 5. 人数（右揃え）
+        const countText = `（${s.count}人）`;
+        const countX = 1080;
         ctx.font = `${fontPx}px ${FONT}`;
-        ctx.fillText(`（${s.count}人）`, countX, cy);
+        ctx.fillText(countText, countX, cy);
+        ctx.textAlign = 'left';
 
         ctx.textBaseline = 'alphabetic';
       });
@@ -722,12 +725,13 @@
       const showPercent = document.getElementById('showPercent').checked;
       const distRatio = parseInt(document.getElementById('percentDist').value, 10) / 100;
       if (showPercent) {
+        const fontSize = parseInt(document.getElementById('percentFontSize').value, 10) || 32;
         mids.forEach(({ s, mid, frac }) => {
           if (frac < 0.035) return;
           const dist = R * distRatio;
           const x = pcx + Math.cos(mid) * dist;
           const y = pcy + Math.sin(mid) * dist;
-          ctx.font = `bold 32px ${FONT}`;
+          ctx.font = `bold ${fontSize}px ${FONT}`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.lineWidth = 6;
