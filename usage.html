@@ -47,6 +47,7 @@
     #topTextControls input[type=text] { width: 420px; padding: 4px 6px; }
     #topTextControls label { margin-right: 16px; }
     #pieControls { margin: 8px 0; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; background: #f9f9f9; }
+    #listControls { margin: 8px 0; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; background: #f9f9f9; }
   </style>
 </head>
 <body>
@@ -96,11 +97,11 @@
     高さ位置 <input type="number" id="topY" value="70" min="20" max="120" style="width:60px" oninput="renderSnsCanvas()"> （140px内）
   </div>
 
-  <div id="pieControls">
-    円グラフ位置：
-    中心X <input type="number" id="pieCx" value="1440" min="200" max="1800" style="width:70px" oninput="renderSnsCanvas()">
-    中心Y <input type="number" id="pieCy" value="580" min="200" max="900" style="width:70px" oninput="renderSnsCanvas()">
-    半径 <input type="number" id="pieR" value="380" min="200" max="500" style="width:70px" oninput="renderSnsCanvas()">
+  <div id="listControls">
+    箇条書き位置・サイズ：
+    X <input type="number" id="listX" value="50" min="0" max="400" style="width:60px" oninput="renderSnsCanvas()">
+    上端Y <input type="number" id="listTop" value="235" min="140" max="500" style="width:60px" oninput="renderSnsCanvas()">
+    サイズ <input type="number" id="listScale" value="100" min="60" max="150" style="width:60px" oninput="renderSnsCanvas()">%
   </div>
 
   <p>
@@ -601,18 +602,17 @@
       }
       slices.forEach(s => { s.percent = (s.count / totalCount * 100).toFixed(1); });
 
-      const padX = 50;
+      const padX = parseInt(document.getElementById('listX').value, 10) || 50;
       const eventName = document.getElementById('eventName').value.trim();
       ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
-      // デッキ使用率分布の固定表示は削除（上部テキストに移行）
-      ctx.fillStyle = '#aab3d6';
-      ctx.font = `34px ${FONT}`;
-      ctx.fillText((eventName ? eventName + '　' : '') + `全${totalCount}人`, padX, 190);
+      // 全XX人の表示は削除
 
-      const listTop = 235;
+      const listTop = parseInt(document.getElementById('listTop').value, 10) || 235;
+      const listScale = parseInt(document.getElementById('listScale').value, 10) || 100;
       const listBottom = H - 55;
-      const rowH = Math.min(78, (listBottom - listTop) / slices.length);
+      const baseRowH = Math.min(78, (listBottom - listTop) / slices.length);
+      const rowH = baseRowH * (listScale / 100);
       const thumbH = rowH - 12;
       const thumbW = thumbH * 0.716;
       const fontPx = Math.min(34, Math.floor(rowH * 0.46));
