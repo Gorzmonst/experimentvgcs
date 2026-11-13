@@ -110,6 +110,7 @@
     X <input type="number" id="listX" value="50" min="0" max="400" style="width:60px" oninput="renderSnsCanvas()">
     上端Y <input type="number" id="listTop" value="235" min="140" max="500" style="width:60px" oninput="renderSnsCanvas()">
     サイズ <input type="number" id="listScale" value="100" min="60" max="150" style="width:60px" oninput="renderSnsCanvas()">%
+    文字色 <input type="text" id="listTextColor" value="#000000" style="width:90px" oninput="renderSnsCanvas()">
   </div>
 
   <p>
@@ -327,10 +328,10 @@
     }
 
     function getRideInfo(deckName) {
+      // 同名カードの場合
       for (const [base, def] of Object.entries(AMBIGUOUS_DECKS)) {
         for (const v of def.variants) {
           if (deckName === v.name) {
-            // ベースの正式名称から国家を引き継ぐ
             const baseInfo = rideMap[normKey(base)] || {};
             return {
               正式名称: v.name,
@@ -341,6 +342,7 @@
           }
         }
       }
+      // 通常の検索（完全一致）
       return rideMap[normKey(deckName)] || null;
     }
 
@@ -617,6 +619,7 @@
       slices.forEach(s => { s.percent = (s.count / totalCount * 100).toFixed(1); });
 
       const padX = parseInt(document.getElementById('listX').value, 10) || 50;
+      const listTextColor = document.getElementById('listTextColor').value || '#000000';
       const eventName = document.getElementById('eventName').value.trim();
       ctx.textBaseline = 'alphabetic';
 
@@ -628,7 +631,7 @@
       const thumbH = rowH - 12;
       const thumbW = thumbH * 0.716;
       const fontPx = Math.min(34, Math.floor(rowH * 0.46));
-      const statsRight = 960;
+      const statsRight = padX + 910;
 
       slices.forEach((s, i) => {
         const cy = listTop + rowH * i + rowH / 2;
@@ -651,7 +654,7 @@
 
         const nameX = tx + thumbW + 18;
         ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = listTextColor;
         const stats = `${s.percent}%（${s.count}人）`;
         ctx.textAlign = 'right';
         ctx.font = `bold ${fontPx}px ${FONT}`;
