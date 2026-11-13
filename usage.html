@@ -192,16 +192,8 @@
           });
         })
         .catch(() => {
-          // デフォルト色
-          nationColorMap = {
-            'リリステ': '#ff6b9d',
-            'ダークステイツ': '#6b5b95',
-            'ブラントゲート': '#f9a825',
-            'ケテルサンクチュアリ': '#42a5f5',
-            'ストイケイア': '#66bb6a',
-            'ドラゴンエンパイア': '#ef5350'
-          };
-          if (statusEl) statusEl.textContent = 'nations.csv 読み込み失敗 → デフォルト色を使用';
+          nationColorMap = {};
+          if (statusEl) statusEl.textContent = 'nations.csv 読み込み失敗（色分けなし）';
           renderSnsCanvas();
         });
     }
