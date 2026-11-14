@@ -33,7 +33,7 @@
       position: sticky;
       top: 16px;
     }
-    #snsCanvas { width: 100%; height: auto; display: block; border: 1px solid #ccc; background: #10162b; }
+    #snsCanvas { width: 100%; max-width: 960px; height: auto; display: block; border: 1px solid #ccc; background: #10162b; margin: 0 auto; }
     button { padding: 5px 12px; margin: 3px 4px 3px 0; cursor: pointer; font-size: 0.9em; }
     #adjustModeBtn.active { background: #e74c3c; color: white; }
     #adjustHint { color: #666; font-size: 0.9em; display: none; }
@@ -50,7 +50,7 @@
     #splitPanel table { width: 100%; border-collapse: collapse; }
     #splitPanel td { padding: 3px 2px; }
     #splitPanel input[type=number] { width: 60px; padding: 2px 4px; }
-    #snsCanvas { width: 100%; height: auto; display: block; border: 1px solid #ccc; background: #10162b; }
+    #snsCanvas { width: 100%; max-width: 960px; height: auto; display: block; border: 1px solid #ccc; background: #10162b; margin: 0 auto; }
     #snsCanvas.adjusting { cursor: grab; touch-action: none; }
     #snsCanvas.dragging { cursor: grabbing; }
     #verInfo {
@@ -81,15 +81,15 @@
     <div class="controls">
 
   <p>
-    トナメルCSV：<input type="file" id="csvFile" accept=".csv">
-    デッキ名カラム：<input type="text" id="deckColumn" value="使用されるデッキのG3" style="width:200px">
+    トナメルCSV：<input type="file" id="csvFile" accept=".csv"><br>
+    デッキ名カラム：<input type="text" id="deckColumn" value="使用されるデッキのG3" style="width:200px"><br>
     <button onclick="processCSV()">集計</button>
     <button onclick="reloadCSVs()">CSV再読み込み</button>
   </p>
-  <p id="rideStatus">ライドラインマッピング読み込み中...</p>
-  <p id="ambStatus">同名カード定義読み込み中...</p>
-  <p id="nationStatus">国家色読み込み中...</p>
-  <p id="settingsStatus">設定読み込み中...</p>
+  <p id="rideStatus" style="font-size:0.85em; color:#555; margin:2px 0;">ライドラインマッピング読み込み中...</p>
+  <p id="ambStatus" style="font-size:0.85em; color:#555; margin:2px 0;">同名カード定義読み込み中...</p>
+  <p id="nationStatus" style="font-size:0.85em; color:#555; margin:2px 0;">国家色読み込み中...</p>
+  <p id="settingsStatus" style="font-size:0.85em; color:#555; margin:2px 0;">設定読み込み中...</p>
 
   <div id="splitPanel">
     <strong>同名カードの振り分け</strong>（合計人数と一致するように入力してください）
