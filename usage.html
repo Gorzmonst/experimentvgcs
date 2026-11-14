@@ -9,11 +9,28 @@
   <style>
     body {
       font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif;
-      max-width: 1100px;
-      margin: 0 auto;
-      padding: 20px;
-      line-height: 1.6;
+      margin: 0;
+      padding: 16px;
+      line-height: 1.5;
     }
+    .layout {
+      display: flex;
+      gap: 20px;
+      align-items: flex-start;
+    }
+    .controls {
+      flex: 0 0 420px;
+      max-height: calc(100vh - 40px);
+      overflow-y: auto;
+      padding-right: 8px;
+    }
+    .preview {
+      flex: 1;
+      min-width: 0;
+      position: sticky;
+      top: 16px;
+    }
+    #snsCanvas { width: 100%; height: auto; display: block; border: 1px solid #ccc; background: #10162b; }
     button { padding: 8px 16px; margin: 5px 5px 5px 0; cursor: pointer; }
     #adjustModeBtn.active { background: #e74c3c; color: white; }
     #adjustHint { color: #666; font-size: 0.9em; display: none; }
@@ -54,6 +71,9 @@
   <p><a href="index.html">← トップへ戻る</a></p>
   <h1>デッキ使用率分布</h1>
 
+  <div class="layout">
+    <div class="controls">
+
   <p>
     トナメルCSV：<input type="file" id="csvFile" accept=".csv">
     デッキ名カラム：<input type="text" id="deckColumn" value="使用されるデッキのG3" style="width:200px">
@@ -63,6 +83,7 @@
   <p id="rideStatus">ライドラインマッピング読み込み中...</p>
   <p id="ambStatus">同名カード定義読み込み中...</p>
   <p id="nationStatus">国家色読み込み中...</p>
+  <p id="settingsStatus">設定読み込み中...</p>
 
   <div id="splitPanel">
     <strong>同名カードの振り分け</strong>（合計人数と一致するように入力してください）
@@ -132,9 +153,14 @@
     <button onclick="resetSelected()">この画像をリセット</button>
   </div>
 
+  </div>
+
+  <div class="preview">
   <canvas id="snsCanvas" width="1920" height="1080"></canvas>
   <p id="imgStatus" style="font-size:0.9em;color:#555;"></p>
   <div id="verInfo"></div>
+  </div>
+  </div>
 
   <script>
     const APP_VERSION = '2026.11.13-clean';
@@ -183,6 +209,7 @@
       document.getElementById('rideStatus').textContent = 'ライドラインマッピング読み込み中...';
       document.getElementById('ambStatus').textContent = '同名カード定義読み込み中...';
       document.getElementById('nationStatus').textContent = '国家色読み込み中...';
+      document.getElementById('settingsStatus').textContent = '設定読み込み中...';
       loadRideLines();
       loadAmbiguous();
       loadNationColors();
@@ -190,6 +217,8 @@
     }
 
     function loadSettings() {
+      const statusEl = document.getElementById('settingsStatus');
+      if (statusEl) statusEl.textContent = '設定読み込み中...';
       fetch('./settings.csv')
         .then(r => r.ok ? r.text() : Promise.reject())
         .then(text => {
@@ -223,11 +252,14 @@
               set('topText', 'topText');
               set('topFontSize', 'topFontSize');
               set('topY', 'topY');
+              if (statusEl) statusEl.textContent = `設定読み込み完了（${Object.keys(map).length}件）`;
               renderSnsCanvas();
             }
           });
         })
-        .catch(() => {});
+        .catch(() => {
+          if (statusEl) statusEl.textContent = 'settings.csv 読み込み失敗';
+        });
     }
 
     function loadNationColors() {
