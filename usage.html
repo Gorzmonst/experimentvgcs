@@ -34,7 +34,7 @@
       top: 16px;
     }
     #snsCanvas { width: 100%; height: auto; display: block; border: 1px solid #ccc; background: #10162b; }
-    button { padding: 8px 16px; margin: 5px 5px 5px 0; cursor: pointer; }
+    button { padding: 5px 12px; margin: 3px 4px 3px 0; cursor: pointer; font-size: 0.9em; }
     #adjustModeBtn.active { background: #e74c3c; color: white; }
     #adjustHint { color: #666; font-size: 0.9em; display: none; }
     #adjustPanel {
@@ -43,12 +43,13 @@
     }
     #adjustPanel input[type=range] { width: 220px; vertical-align: middle; }
     #splitPanel {
-      display: none; margin: 12px 0; padding: 12px 16px;
-      border: 1px solid #c9d0e8; border-radius: 8px; background: #f4f6fb;
+      display: none; margin: 8px 0; padding: 8px 10px;
+      border: 1px solid #c9d0e8; border-radius: 6px; background: #f4f6fb;
+      font-size: 0.9em;
     }
     #splitPanel table { width: 100%; border-collapse: collapse; }
-    #splitPanel td { padding: 6px 4px; }
-    #splitPanel input[type=number] { width: 70px; padding: 4px; }
+    #splitPanel td { padding: 3px 2px; }
+    #splitPanel input[type=number] { width: 60px; padding: 2px 4px; }
     #snsCanvas { width: 100%; height: auto; display: block; border: 1px solid #ccc; background: #10162b; }
     #snsCanvas.adjusting { cursor: grab; touch-action: none; }
     #snsCanvas.dragging { cursor: grabbing; }
@@ -71,8 +72,10 @@
   </style>
 </head>
 <body>
-  <p><a href="index.html">← トップへ戻る</a></p>
-  <h1>デッキ使用率分布</h1>
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+    <a href="index.html" style="font-size:0.85em;">← トップへ戻る</a>
+    <h1 style="margin:0; font-size:1.3em;">デッキ使用率分布</h1>
+  </div>
 
   <div class="layout">
     <div class="controls">
@@ -94,7 +97,6 @@
   </div>
 
   <p>
-    大会名（任意）：<input type="text" id="eventName" style="width:260px" oninput="renderSnsCanvas()">
     リスト表示数：<input type="number" id="snsTop" value="10" min="3" max="12" style="width:60px" oninput="renderSnsCanvas()">
   </p>
 
@@ -113,14 +115,14 @@
   </div>
 
   <div id="listControls">
-    箇条書き：
-    X <input type="number" id="listX" value="50" min="0" max="400" style="width:60px" oninput="renderSnsCanvas()">
-    Y <input type="number" id="listTop" value="235" min="140" max="500" style="width:60px" oninput="renderSnsCanvas()">
-    拡大縮小 <input type="number" id="listScale" value="100" min="60" max="150" style="width:60px" oninput="renderSnsCanvas()">%
-    行間 <input type="number" id="lineSpacing" value="100" min="60" max="200" style="width:60px" oninput="renderSnsCanvas()">%
-    フォントサイズ <input type="number" id="listFontSize" value="28" min="12" max="48" style="width:60px" oninput="renderSnsCanvas()"> px
-    ％位置 <input type="number" id="percentX" value="900" min="400" max="1400" style="width:70px" oninput="renderSnsCanvas()">
-    人数位置 <input type="number" id="countX" value="1080" min="500" max="1500" style="width:70px" oninput="renderSnsCanvas()">
+    箇条書き：<br>
+    X <input type="number" id="listX" value="50" min="0" max="400" style="width:60px" oninput="renderSnsCanvas()"><br>
+    Y <input type="number" id="listTop" value="235" min="140" max="500" style="width:60px" oninput="renderSnsCanvas()"><br>
+    拡大縮小 <input type="number" id="listScale" value="100" min="60" max="150" style="width:60px" oninput="renderSnsCanvas()">%<br>
+    行間 <input type="number" id="lineSpacing" value="100" min="60" max="200" style="width:60px" oninput="renderSnsCanvas()">%<br>
+    フォントサイズ <input type="number" id="listFontSize" value="28" min="12" max="48" style="width:60px" oninput="renderSnsCanvas()"> px<br>
+    ％位置 <input type="number" id="percentX" value="900" min="400" max="1400" style="width:70px" oninput="renderSnsCanvas()"><br>
+    人数位置 <input type="number" id="countX" value="1080" min="500" max="1500" style="width:70px" oninput="renderSnsCanvas()"><br>
     文字色 <input type="text" id="listTextColor" value="#000000" style="width:90px" oninput="renderSnsCanvas()">
   </div>
 
@@ -721,7 +723,7 @@
 
       const padX = parseInt(document.getElementById('listX').value, 10) || 50;
       const listTextColor = document.getElementById('listTextColor').value || '#000000';
-      const eventName = document.getElementById('eventName').value.trim();
+      const eventName = '';
       ctx.textBaseline = 'alphabetic';
 
       const listTop = parseInt(document.getElementById('listTop').value, 10) || 235;
