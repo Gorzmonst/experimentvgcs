@@ -102,23 +102,6 @@
     サイズ <input type="number" id="percentFontSize" value="32" min="16" max="60" style="width:60px" oninput="renderSnsCanvas()"> px
   </div>
 
-  <div id="bottomTextControls">
-    下部テキスト：<input type="text" id="bottomText" placeholder="ここに入力した文字が黒帯に表示されます" oninput="renderSnsCanvas()">
-    <br>
-    <label><input type="radio" name="bottomAlign" value="left" checked onchange="renderSnsCanvas()"> 左揃え</label>
-    <label><input type="radio" name="bottomAlign" value="center" onchange="renderSnsCanvas()"> 中央揃え</label>
-    <label><input type="radio" name="bottomAlign" value="right" onchange="renderSnsCanvas()"> 右揃え</label>
-  </div>
-
-  <div id="topTextControls">
-    上部テキスト：<input type="text" id="topText" value="デッキ使用率分布" oninput="renderSnsCanvas()">
-    <br>
-    <label><input type="radio" name="topAlign" value="left" checked onchange="renderSnsCanvas()"> 左揃え</label>
-    <label><input type="radio" name="topAlign" value="center" onchange="renderSnsCanvas()"> 中央揃え</label>
-    <label><input type="radio" name="topAlign" value="right" onchange="renderSnsCanvas()"> 右揃え</label>
-    <br>
-    サイズ <input type="number" id="topFontSize" value="48" min="20" max="80" style="width:60px" oninput="renderSnsCanvas()"> px
-    高さ位置 <input type="number" id="topY" value="70" min="20" max="120" style="width:60px" oninput="renderSnsCanvas()"> （140px内）
   </div>
 
   <div id="pieControls">
@@ -140,11 +123,6 @@
     文字色 <input type="text" id="listTextColor" value="#000000" style="width:90px" oninput="renderSnsCanvas()">
   </div>
 
-  <p>
-    <button id="adjustModeBtn" onclick="toggleAdjustMode()">円グラフ調整モード: OFF</button>
-    <button onclick="resetAll()">全画像の位置・拡大率をリセット</button>
-    <button onclick="resetPercentPos()">％表示の位置をリセット</button>
-  </p>
   <p id="adjustHint">調整モード中：円グラフの項目をタップして選択し、そのままドラッグで画像の位置を動かせます。拡大・縮小はスライダー（PCはマウスホイールも可）。項目の外にはみ出した部分は表示されません。</p>
   <div id="adjustPanel">
     <div id="selName" style="margin-bottom:4px;">円グラフの項目をタップして選択してください</div>
@@ -156,6 +134,31 @@
   </div>
 
   <div class="preview">
+  <div id="topTextControls">
+    上部テキスト：<input type="text" id="topText" value="デッキ使用率分布" oninput="renderSnsCanvas()">
+    <br>
+    <label><input type="radio" name="topAlign" value="left" checked onchange="renderSnsCanvas()"> 左揃え</label>
+    <label><input type="radio" name="topAlign" value="center" onchange="renderSnsCanvas()"> 中央揃え</label>
+    <label><input type="radio" name="topAlign" value="right" onchange="renderSnsCanvas()"> 右揃え</label>
+    <br>
+    サイズ <input type="number" id="topFontSize" value="48" min="20" max="80" style="width:60px" oninput="renderSnsCanvas()"> px
+    高さ位置 <input type="number" id="topY" value="70" min="20" max="120" style="width:60px" oninput="renderSnsCanvas()"> （140px内）
+  </div>
+
+  <div id="bottomTextControls">
+    下部テキスト：<input type="text" id="bottomText" placeholder="ここに入力した文字が黒帯に表示されます" oninput="renderSnsCanvas()">
+    <br>
+    <label><input type="radio" name="bottomAlign" value="left" checked onchange="renderSnsCanvas()"> 左揃え</label>
+    <label><input type="radio" name="bottomAlign" value="center" onchange="renderSnsCanvas()"> 中央揃え</label>
+    <label><input type="radio" name="bottomAlign" value="right" onchange="renderSnsCanvas()"> 右揃え</label>
+  </div>
+
+  <p style="display:flex; gap:8px; flex-wrap:wrap;">
+    <button id="adjustModeBtn" onclick="toggleAdjustMode()">円グラフ調整モード: OFF</button>
+    <button onclick="resetAll()">全画像の位置・拡大率をリセット</button>
+    <button onclick="resetPercentPos()">％表示の位置をリセット</button>
+  </p>
+
   <canvas id="snsCanvas" width="1920" height="1080"></canvas>
   <p id="imgStatus" style="font-size:0.9em;color:#555;"></p>
   <div id="verInfo"></div>
